@@ -1,0 +1,61 @@
+llm:
+  provider: deepseek
+  api_key: ''
+  base_url: ''
+  model: deepseek-chat
+  vision_model: deepseek-chat
+  max_tokens: 2048
+  temperature: 0.3
+grading:
+  mode: custom
+  pass_line: 60
+  tiers:
+    切题:
+      ratio_min: 0.0
+      ratio_max: 0.45
+      desc: ''
+    切题_截图:
+      ratio_min: 0.3
+      ratio_max: 0.0
+      desc: ''
+    切题_无视频:
+      ratio_min: 0.4
+      ratio_max: 0.0
+      desc: ''
+    切题_无链接:
+      ratio_min: 0.0
+      ratio_max: 0.7
+      desc: ''
+    跑题:
+      ratio_min: 0.0
+      ratio_max: 0.0
+      desc: ''
+    敷衍:
+      ratio_min: 0.0
+      ratio_max: 0.0
+      desc: ''
+    空:
+      ratio_min: 0.0
+      ratio_max: 0.0
+      desc: ''
+  code_base_ratio: 0.6
+image:
+  max_width: 768
+  quality: 75
+  skip_below_kb: 50
+scope:
+  question_ids: []
+  student_ids: []
+  start_index: 0
+  max_papers: 0
+output:
+  format: excel
+  individual_reports: true
+  summary_report: true
+database:
+  type: sqlite
+  sqlite_path: db.sqlite3
+agent_test:
+  enabled: false
+  timeout: 15
+  headless: true

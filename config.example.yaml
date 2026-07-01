@@ -1,0 +1,50 @@
+# ============================================
+# 阅卷系统 - 配置文件（示例）
+# 复制为 config.yaml 后填入实际值
+# ============================================
+
+# ---- LLM API 配置 ----
+llm:
+  provider: "anthropic"
+  api_key: ""                   # 或设环境变量 ANTHROPIC_API_KEY
+  base_url: ""                  # 代理地址，留空用默认
+  model: "claude-sonnet-4-6"
+  vision_model: "claude-sonnet-4-6"
+  max_tokens: 2048
+  temperature: 0.3
+
+# ---- 评分模式 ----
+grading:
+  mode: "relaxed"               # relaxed=宽松 / normal=标准 / strict=严格
+  base_score_ratio: 0.6
+  pass_line: 60
+
+# ---- 图像处理 ----
+image:
+  max_width: 768
+  quality: 75
+  skip_below_kb: 50
+
+# ---- 阅卷范围 ----
+scope:
+  question_ids: []
+  student_ids: []
+  start_index: 0
+  max_papers: 0
+
+# ---- 输出 ----
+output:
+  format: "excel"
+  individual_reports: true
+  summary_report: true
+
+# ---- 数据库 ----
+database:
+  type: "sqlite"
+  sqlite_path: "db.sqlite3"
+
+# ---- 智能体实测（题五）----
+agent_test:
+  enabled: false
+  timeout: 15
+  headless: true

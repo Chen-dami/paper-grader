@@ -1,0 +1,13 @@
+# 阅卷系统 - 依赖包
+python-docx>=1.0.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+Pillow>=10.0.0
+PyYAML>=6.0
+openai>=1.0.0
+streamlit>=1.28.0
+olefile>=0.47
+# 可选：MySQL 数据库
+# PyMySQL>=1.1.0
+# 可选：智能体链接实测
+# playwright>=1.40.0

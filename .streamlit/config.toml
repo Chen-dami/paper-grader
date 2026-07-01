@@ -1,0 +1,24 @@
+[theme]
+# === 温润书院风 · 配色 ===
+# 背景：暖羊皮纸
+backgroundColor = "#F7F5F0"
+# 侧边栏/次级背景：羊皮纸（与主区一致）
+secondaryBackgroundColor = "#F7F5F0"
+# 主文字：墨色
+textColor = "#2C2416"
+# 强调色：松绿
+primaryColor = "#4A7C59"
+
+# 字体栈（Windows 优先宋体，fallback 到雅黑）
+font = "STSong, Source Sans 3, Microsoft YaHei, sans-serif"
+
+[client]
+# 隐藏 Deploy 按钮和开发者选项（官方方式，最稳健）
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# 启动时不自动打开浏览器
+headless = false

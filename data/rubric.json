@@ -1,0 +1,120 @@
+{
+  "exam": {
+    "name": "数字媒体基础实践",
+    "semester": "2025-2026学年第二学期",
+    "total_score": 100,
+    "time_limit": "90分钟"
+  },
+  "questions": [
+    {
+      "id": 1,
+      "name": "文本生成",
+      "max_score": 15,
+      "description": "以茶艺传承为主题，写小红书/朋友圈种草文案，300字以内",
+      "grading_type": "text",
+      "topic_keywords": ["茶艺", "茶文化", "茶道", "茶叶", "泡茶", "茶器", "茶饮", "茶", "茗"],
+      "submission_labels": [
+        {"label": "提示词", "field": "prompt_text"},
+        {"label": "生成结果", "field": "result_text", "type": "text_or_image"},
+        {"label": "截图", "field": "screenshot"}
+      ],
+      "data_checks": null,
+      "criteria": [
+        {"id": "1-1", "name": "主题契合度", "max": 5, "desc": "是否围绕茶艺主题，突出传统与创新结合"},
+        {"id": "1-2", "name": "文案质量与文笔", "max": 5, "desc": "语言流畅、有感染力，符合小红书/朋友圈风格"},
+        {"id": "1-3", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词结构清晰，提交材料齐全"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "图像生成",
+      "max_score": 20,
+      "description": "设计文昌航天发射场宣传海报，多模态工具生成",
+      "grading_type": "vision",
+      "topic_keywords": ["文昌", "航天", "火箭", "发射", "卫星", "空间站", "太空", "宇宙"],
+      "submission_labels": [
+        {"label": "提示词", "field": "prompt_text"},
+        {"label": "生成", "field": "generated_images", "type": "image"},
+        {"label": "截图", "field": "process_screenshot", "type": "image"}
+      ],
+      "data_checks": null,
+      "criteria": [
+        {"id": "2-1", "name": "主题契合度", "max": 5, "desc": "海报围绕文昌航天发射场主题"},
+        {"id": "2-2", "name": "模型使用合理性", "max": 5, "desc": "提示词结构合理，善用工具参数"},
+        {"id": "2-3", "name": "创意与艺术性", "max": 5, "desc": "视觉效果有创意，构图有设计感"},
+        {"id": "2-4", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词规范，材料齐全，过程完整"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "视频生成",
+      "max_score": 20,
+      "description": "以黎族传统纺织技艺为主题，图生视频，非遗宣传",
+      "grading_type": "vision",
+      "topic_keywords": ["黎族", "纺织", "织锦", "非遗", "文化遗产", "传统工艺", "黎锦"],
+      "submission_labels": [
+        {"label": "参考图", "field": "image_prompt"},
+        {"label": "图片提示词", "field": "image_prompt"},
+        {"label": "视频提示词", "field": "video_prompt"},
+        {"label": "生成", "field": "generated_image", "type": "image"},
+        {"label": "视频", "field": "video", "type": "video"}
+      ],
+      "data_checks": null,
+      "criteria": [
+        {"id": "3-1", "name": "主题契合与文化准确", "max": 4, "desc": "突出黎族纺织核心特点，文化表达准确"},
+        {"id": "3-2", "name": "图片质量与构图", "max": 4, "desc": "参考图达标，构图合理"},
+        {"id": "3-3", "name": "视频完成度", "max": 7, "desc": "画面完整，与参考图同步，整体流畅"},
+        {"id": "3-4", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词规范，材料齐全"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "数据处理",
+      "max_score": 20,
+      "description": "处理Excel数据：去重、补空值、格式统一、排序",
+      "grading_type": "code",
+      "topic_keywords": [],
+      "submission_labels": [
+        {"label": "提示词", "field": "prompt_text"},
+        {"label": "Excel", "field": "excel", "type": "file"},
+        {"label": "截图", "field": "screenshot"}
+      ],
+      "data_checks": {
+        "dedup": true,
+        "fillna": {"column_pattern": "金额|价|amount"},
+        "date_format": {"column_pattern": "日期|时间|date", "format": "YYYY-MM-DD"},
+        "sort": {"column_pattern": "日期|时间|date"}
+      },
+      "criteria": [
+        {"id": "4-1", "name": "删除重复项", "max": 5, "desc": "去重正确，逻辑清晰，无错误和遗漏"},
+        {"id": "4-2", "name": "缺失值处理", "max": 5, "desc": "补空值正确，公式正确，无遗漏"},
+        {"id": "4-3", "name": "统一格式与排序", "max": 5, "desc": "日期格式统一为YYYY-MM-DD，按销售日期排序"},
+        {"id": "4-4", "name": "提示词规范与完成度", "max": 5, "desc": "提示词逻辑合理，提交材料完整"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "智能体开发",
+      "max_score": 25,
+      "description": "用Coze搭建校园失物招领智能体，含知识库匹配",
+      "grading_type": "hybrid",
+      "topic_keywords": ["失物", "招领", "校园", "丢失", "拾到", "捡到", "物品", "学生卡", "失主"],
+      "submission_labels": [
+        {"label": "人设", "field": "persona_text"},
+        {"label": "逻辑", "field": "persona_text"},
+        {"label": "角色", "field": "persona_text"},
+        {"label": "链接", "field": "bot_link"},
+        {"label": "coze", "field": "bot_link"},
+        {"label": "截图", "field": "screenshot"}
+      ],
+      "data_checks": null,
+      "criteria": [
+        {"id": "5-1", "name": "功能完整与流程", "max": 5, "desc": "节点配置正确，流程顺畅，能稳定协同运作"},
+        {"id": "5-2", "name": "人设逻辑规范", "max": 5, "desc": "人设描述清晰，逻辑规范"},
+        {"id": "5-3", "name": "知识库准确", "max": 5, "desc": "知识库内容准确，Excel数据正确导入"},
+        {"id": "5-4", "name": "交互功能", "max": 5, "desc": "欢迎语、预设问题、图片上传、数据库等功能"},
+        {"id": "5-5", "name": "使用效果与材料完整", "max": 5, "desc": "使用效果准确，提交材料完整"}
+      ]
+    }
+  ]
+}

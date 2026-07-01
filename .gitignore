@@ -1,0 +1,28 @@
+# 试卷数据（含学生隐私）
+data/papers/**/*.docx
+data/papers/**/*.doc
+
+# 输出文件
+output/
+
+# 数据库
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 运行时临时文件
+data/.session_token
