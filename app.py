@@ -10,7 +10,7 @@ st.set_page_config(page_title="阅卷系统", page_icon="📝", layout="wide",
                    initial_sidebar_state="expanded")
 
 from src.ui_style import inject; inject()
-from src.utils import hpw, load_teacher
+from src.utils import hpw, load_users, verify_user, save_user, _ensure_users_file
 
 # ============================================================
 #  session 初始化
@@ -32,8 +32,12 @@ if not st.session_state.authenticated:
             with open(tf) as f:
                 td = f.read().strip().split("\n")
                 if len(td) >= 2 and time.time() - float(td[0]) < 86400:
+                    username = td[1]
+                    users = load_users()
+                    u = users.get(username, {})
                     st.session_state.authenticated = True
-                    st.session_state.teacher_name = td[1]
+                    st.session_state.teacher_name = f"{u.get('display_name', username)}教师"
+                    st.session_state.username = username
         except:
             pass
 
@@ -50,19 +54,28 @@ if not st.session_state.authenticated:
     with c[1]:
         st.markdown("---")
         st.subheader("教师登录")
-        ph, t = load_teacher()
-        st.session_state.teacher_name = t
-        pw = st.text_input("请输入访问密码", type="password", placeholder="输入密码...")
-        if st.button("登 录", type="primary", use_container_width=True) and pw:
-            if hpw(pw) == ph:
-                st.session_state.authenticated = True
-                os.makedirs("data", exist_ok=True)
-                with open("data/.session_token", "w") as f:
-                    f.write(f"{time.time()}\n{t}")
-                st.rerun()
+        username = st.text_input("用户名", placeholder="请输入用户名")
+        pw = st.text_input("密码", type="password", placeholder="请输入密码")
+        if st.button("登 录", type="primary", use_container_width=True):
+            if username and pw:
+                result = verify_user(username, pw)
+                if result:
+                    display_name, role = result
+                    st.session_state.authenticated = True
+                    st.session_state.teacher_name = f"{display_name}教师"
+                    st.session_state.username = username
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/.session_token", "w") as f:
+                        f.write(f"{time.time()}\n{username}")
+                    st.rerun()
+                else:
+                    st.error("用户名或密码错误")
+            elif not username:
+                st.error("请输入用户名")
             else:
-                st.error("密码错误")
-        st.caption(f"默认密码: admin123  |  教师: {t}")
+                st.error("请输入密码")
+        _ensure_users_file()
+        st.caption("默认账号: admin / admin123")
     st.stop()
 
 # ============================================================
@@ -132,11 +145,10 @@ with st.sidebar:
         st.caption(f"当前模式：{mode_labels.get(cur_mode, cur_mode)}")
         new_pw = st.text_input("修改密码", type="password", key="sb_pwd")
         if new_pw and st.button("确认修改", key="sb_pwd_btn"):
-            import hashlib
-            pw_hash = hashlib.sha256(new_pw.encode()).hexdigest()
-            os.makedirs("data", exist_ok=True)
-            with open("data/.teacher_pwd", "w", encoding="utf-8") as f:
-                f.write(f"{pw_hash}\n{teacher}")
+            uname = st.session_state.get("username", "admin")
+            users = load_users()
+            u = users.get(uname, {})
+            save_user(uname, new_pw, u.get("display_name", uname), u.get("role", "teacher"))
             st.success("密码已修改")
 
     # 常见问题

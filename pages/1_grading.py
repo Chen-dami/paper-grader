@@ -98,7 +98,7 @@ with tab1:
     )
     st.session_state.papers_root = papers_root
 
-    if st.button("🔍 扫描班级", type="primary", use_container_width=True):
+    if st.button("扫描班级", type="primary", use_container_width=True):
         st.session_state.scan_done = True
         st.rerun()
 

@@ -99,32 +99,48 @@ def _detect_tier(q_data: dict, question: dict, config: dict) -> str:
     """
     keywords = question.get("topic_keywords", [])
     gtype = question.get("grading_type", "text")
+    name = question.get("name", "")
 
     # 收集所有文本
     all_text = _collect_text(q_data, gtype)
 
-    # 检查是否有实质内容
+    # ---- 关键词匹配（至少 2 个，降低误判） ----
     has_topic = False
     if keywords:
-        has_topic = any(kw in all_text for kw in keywords)
+        matched = [kw for kw in keywords if kw in all_text]
+        if len(keywords) >= 2:
+            has_topic = len(matched) >= 2
+        else:
+            has_topic = len(matched) >= 1
     else:
         # 没有配置关键词 → 默认算切题
         has_topic = True
 
     has_substance = len(all_text.strip()) > _substance_threshold(gtype)
 
-    # 特殊检查
+    # ---- 特殊检查 ----
     has_video = bool(q_data.get("has_video") and q_data.get("video_path"))
     has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
     result_is_screenshot = bool(q_data.get("result_is_screenshot"))
+    has_images = bool(q_data.get("generated_images") or q_data.get("reference_image")
+                      or q_data.get("generated_image"))
 
     if not has_topic:
         return "跑题"
     elif not has_substance:
         return "敷衍"
-    elif gtype == "vision" and "视频" in question.get("name", "") and not has_video and has_topic:
-        return "切题_无视频"
-    elif result_is_screenshot:
+
+    # vision 类素材检查（优先级：全缺 > 无视频 > 无图）
+    if gtype == "vision":
+        video_expected = "视频" in name
+        if video_expected and not has_video and not has_images:
+            return "切题_无素材"
+        elif video_expected and not has_video:
+            return "切题_无视频"
+        elif not has_images:
+            return "切题_无图像"
+
+    if result_is_screenshot:
         return "切题_截图"
     elif gtype == "hybrid" and not has_link and has_topic:
         return "切题_无链接"

@@ -11,34 +11,59 @@ grading:
   pass_line: 60
   tiers:
     切题:
-      ratio_min: 0.0
-      ratio_max: 0.45
-      desc: ''
+      ratio_min: 0.9
+      ratio_max: 1.0
+      desc: '主题匹配，素材完整'
     切题_截图:
-      ratio_min: 0.3
-      ratio_max: 0.0
-      desc: ''
+      ratio_min: 0.7
+      ratio_max: 0.8
+      desc: '结果以截图呈现'
     切题_无视频:
-      ratio_min: 0.4
-      ratio_max: 0.0
-      desc: ''
-    切题_无链接:
-      ratio_min: 0.0
+      ratio_min: 0.7
+      ratio_max: 0.8
+      desc: '缺少视频文件'
+    切题_无图像:
+      ratio_min: 0.55
       ratio_max: 0.7
-      desc: ''
+      desc: '缺少生成图片'
+    切题_无素材:
+      ratio_min: 0.35
+      ratio_max: 0.5
+      desc: '缺少图片和视频'
+    切题_无链接:
+      ratio_min: 0.7
+      ratio_max: 0.8
+      desc: '缺少发布链接'
+    切题_无Excel:
+      ratio_min: 0.4
+      ratio_max: 0.55
+      desc: '缺少Excel文件'
     跑题:
-      ratio_min: 0.0
-      ratio_max: 0.0
-      desc: ''
+      ratio_min: 0.45
+      ratio_max: 0.55
+      desc: '主题不匹配'
     敷衍:
-      ratio_min: 0.0
-      ratio_max: 0.0
-      desc: ''
+      ratio_min: 0.4
+      ratio_max: 0.5
+      desc: '内容过少'
     空:
       ratio_min: 0.0
       ratio_max: 0.0
-      desc: ''
+      desc: '无内容'
   code_base_ratio: 0.6
+custom_presets:
+  严格Plus:
+    mode: strict
+    tiers:
+      切题: {ratio_min: 0.85, ratio_max: 1.0}
+      切题_截图: {ratio_min: 0.6, ratio_max: 0.75}
+      切题_无视频: {ratio_min: 0.5, ratio_max: 0.65}
+      切题_无图像: {ratio_min: 0.45, ratio_max: 0.6}
+      切题_无素材: {ratio_min: 0.25, ratio_max: 0.4}
+      切题_无链接: {ratio_min: 0.6, ratio_max: 0.75}
+      切题_无Excel: {ratio_min: 0.35, ratio_max: 0.5}
+      跑题: {ratio_min: 0.3, ratio_max: 0.45}
+      敷衍: {ratio_min: 0.2, ratio_max: 0.35}
 image:
   max_width: 768
   quality: 75
