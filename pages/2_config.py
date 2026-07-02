@@ -33,192 +33,148 @@ if "grading_mode" not in st.session_state:
     st.session_state.grading_mode = config.get("grading", {}).get("mode", "relaxed")
 
 # ============================================================
-#  预置模式 + 自定义预设
-# ============================================================
-builtin_tiers = {
-    "relaxed": {"切题": (0.90, 1.0), "切题_截图": (0.70, 0.80), "切题_无视频": (0.70, 0.80),
-                 "切题_无链接": (0.70, 0.80), "跑题": (0.45, 0.55), "敷衍": (0.40, 0.50),
-                 "空": (0, 0), "desc": "鼓励为主，有做就给高分"},
-    "normal":  {"切题": (0.80, 1.0), "切题_截图": (0.60, 0.75), "切题_无视频": (0.60, 0.75),
-                 "切题_无链接": (0.60, 0.75), "跑题": (0.35, 0.50), "敷衍": (0.30, 0.45),
-                 "空": (0, 0), "desc": "平衡鼓励与要求"},
-    "strict":  {"切题": (0.75, 1.0), "切题_截图": (0.50, 0.70), "切题_无视频": (0.50, 0.70),
-                 "切题_无链接": (0.50, 0.70), "跑题": (0.25, 0.40), "敷衍": (0.20, 0.35),
-                 "空": (0, 0), "desc": "有错必扣，高分只给优秀"},
-}
-mode_names = {"relaxed": "宽松", "normal": "标准", "strict": "严格", "custom": "自定义"}
-
-# 加载自定义预设
-custom_presets = config.get("custom_presets") or {}
-
-# ============================================================
 #  Tab 1: 评分模式 & 档位
 # ============================================================
 tab1, tab2, tab3 = st.tabs(["评分模式 & 档位", "题目 & 权重", "数据检查"])
 
+mode_names = {"relaxed": "宽松", "normal": "标准", "strict": "严格", "custom": "自定义"}
+custom_presets = config.get("custom_presets") or {}
+
 with tab1:
-    # 模式选择
     cur_mode = st.session_state.get("grading_mode", "relaxed")
     builtin_keys = ["relaxed", "normal", "strict"]
     custom_keys = list(custom_presets.keys())
     all_modes = builtin_keys + custom_keys + ["custom"]
 
     idx = all_modes.index(cur_mode) if cur_mode in all_modes else 0
-    sel = st.selectbox(
-        "评分模式",
-        all_modes,
-        index=idx,
-        format_func=lambda x: custom_presets[x].get("desc", x) if x in custom_keys else mode_names.get(x, x),
-    )
+    sel = st.selectbox("评分模式", all_modes, index=idx,
+        format_func=lambda x: custom_presets[x].get("desc", x) if x in custom_keys else mode_names.get(x, x))
 
     tiers = config.get("grading", {}).get("tiers", {})
     if not tiers:
         tiers = {}
         config.setdefault("grading", {})["tiers"] = tiers
-    penalties = config.get("grading", {}).get("material_penalties", {})
 
-    # 内置预设定义
+    # 内置预设
     builtin_tiers = {
-        "relaxed": {
-            "贴合主题": (0.90, 1.0), "跑题": (0.45, 0.55), "敷衍": (0.40, 0.50), "空": (0, 0),
-            "desc": "鼓励为主，有做就给高分",
-        },
-        "normal": {
-            "贴合主题": (0.80, 1.0), "跑题": (0.35, 0.50), "敷衍": (0.30, 0.45), "空": (0, 0),
-            "desc": "平衡鼓励与要求",
-        },
-        "strict": {
-            "贴合主题": (0.75, 1.0), "跑题": (0.25, 0.40), "敷衍": (0.20, 0.35), "空": (0, 0),
-            "desc": "有错必扣，高分只给优秀",
-        },
-    }
-    builtin_penalties = {
-        "relaxed": {"仅截图": 0.10, "无视频": 0.10, "无图像": 0.10, "无表格": 0.10, "无链接": 0.05},
-        "normal":  {"仅截图": 0.15, "无视频": 0.15, "无图像": 0.15, "无表格": 0.15, "无链接": 0.10},
-        "strict":  {"仅截图": 0.20, "无视频": 0.20, "无图像": 0.20, "无表格": 0.20, "无链接": 0.15},
+        "relaxed": {"贴合主题": (0.90, 1.0), "跑题": (0.45, 0.55),
+                    "有视频": (0.80, 0.95), "无视频": (0.55, 0.65),
+                    "有截图": (0.75, 0.85), "无截图": (0.55, 0.65),
+                    "敷衍": (0.40, 0.50), "空": (0, 0), "desc": "鼓励为主"},
+        "normal":  {"贴合主题": (0.80, 1.0), "跑题": (0.35, 0.50),
+                    "有视频": (0.70, 0.85), "无视频": (0.45, 0.60),
+                    "有截图": (0.65, 0.80), "无截图": (0.45, 0.60),
+                    "敷衍": (0.30, 0.45), "空": (0, 0), "desc": "平衡"},
+        "strict":  {"贴合主题": (0.75, 1.0), "跑题": (0.25, 0.40),
+                    "有视频": (0.60, 0.75), "无视频": (0.35, 0.50),
+                    "有截图": (0.55, 0.70), "无截图": (0.35, 0.50),
+                    "敷衍": (0.20, 0.35), "空": (0, 0), "desc": "严格"},
     }
 
-    tier_keys = ["贴合主题", "跑题", "敷衍", "空"]
-    penalty_keys = ["仅截图", "无视频", "无图像", "无表格", "无链接"]
-
-    # 确定当前编辑的档位值
     if sel in builtin_keys:
         st.session_state.grading_mode = sel
         current_tiers = {}
-        for tk in tier_keys:
-            rmin, rmax = builtin_tiers[sel].get(tk, (0.5, 1.0))
-            current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
-        current_penalties = dict(builtin_penalties.get(sel, builtin_penalties["normal"]))
+        for tk, (rmin, rmax) in builtin_tiers[sel].items():
+            if tk != "desc":
+                current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
         is_editable = False
     elif sel in custom_keys:
         st.session_state.grading_mode = sel
-        preset = custom_presets[sel]
-        current_tiers = deepcopy(preset.get("tiers", {}))
-        current_penalties = deepcopy(preset.get("material_penalties", {}))
+        current_tiers = deepcopy(custom_presets[sel].get("tiers", {}))
         is_editable = True
-    else:  # "custom"
+    else:
         st.session_state.grading_mode = "custom"
         current_tiers = deepcopy(tiers)
-        current_penalties = deepcopy(penalties)
-        for tk in tier_keys:
-            if tk not in current_tiers:
-                current_tiers[tk] = {"ratio_min": 0.7, "ratio_max": 0.9, "desc": ""}
-        for pk in penalty_keys:
-            if pk not in current_penalties:
-                current_penalties[pk] = 0.15
         is_editable = True
 
     mode_label = custom_presets[sel].get("desc", sel) if sel in custom_keys else mode_names.get(sel, sel)
-    st.caption(f"当前模式：{mode_label}" + ("（预设，仅供查看）" if not is_editable else "（可编辑）"))
+    st.caption(f"当前：{mode_label}" + ("（预设，仅查看）" if not is_editable else "（可编辑）"))
 
     st.divider()
+    st.subheader("档位设置")
 
-    # ===== 主题档位区 =====
-    st.subheader("📊 主题档位")
-    st.caption("判定规则：贴合主题（关键词≥2匹配）→ 跑题（关键词不足）→ 敷衍（内容过少）→ 空（无内容）")
+    # 编辑模式下的添加按钮
+    if is_editable:
+        ac1, ac2 = st.columns([1, 3])
+        with ac1:
+            new_tier_name = st.text_input("新档位名", placeholder="如：有表格", key="new_tier_name")
+        with ac2:
+            st.caption("")
+            if st.button("➕ 添加档位", disabled=not new_tier_name, key="add_tier_btn"):
+                if new_tier_name not in current_tiers:
+                    current_tiers[new_tier_name] = {"ratio_min": 0.5, "ratio_max": 0.75, "desc": ""}
+                    st.rerun()
 
+    # 档位列表
     edited_tiers = {}
-    tcols = st.columns(4)
-    for i, tk in enumerate(tier_keys):
-        with tcols[i]:
-            with st.container(border=True):
-                st.caption(tk)
-                td = current_tiers.get(tk, {"ratio_min": 0.7, "ratio_max": 0.9})
-                rmin = st.slider("最低", 0.0, 1.0, float(td.get("ratio_min", 0.7)),
-                                 step=0.05, key=f"tmin_{tk}", disabled=not is_editable)
-                rmax = st.slider("最高", 0.0, 1.0, float(td.get("ratio_max", 0.9)),
-                                 step=0.05, key=f"tmax_{tk}", disabled=not is_editable)
-                edited_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
+    del_keys = []
+    tkeys = list(current_tiers.keys())
+    for i in range(0, len(tkeys), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j >= len(tkeys):
+                break
+            tk = tkeys[i + j]
+            with cols[j]:
+                with st.container(border=True):
+                    tc1, tc2 = st.columns([3, 1])
+                    with tc1:
+                        st.caption(tk)
+                    with tc2:
+                        if is_editable and tk not in ("空", "敷衍", "跑题", "贴合主题"):
+                            if st.button("✕", key=f"del_{tk}", help=f"删除「{tk}」"):
+                                del_keys.append(tk)
 
-    st.divider()
+                    td = current_tiers.get(tk, {"ratio_min": 0.5, "ratio_max": 0.75})
+                    rmin = st.slider("最低", 0.0, 1.0, float(td.get("ratio_min", 0.5)),
+                                     step=0.05, key=f"tmin_{tk}", disabled=not is_editable)
+                    rmax = st.slider("最高", 0.0, 1.0, float(td.get("ratio_max", 0.75)),
+                                     step=0.05, key=f"tmax_{tk}", disabled=not is_editable)
+                    edited_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
 
-    # ===== 素材扣分区 =====
-    st.subheader("📎 素材扣分")
-    st.caption("每个缺失标记从基础分中扣除对应比例，可多个叠加。空提交不参与素材扣分。")
+    # 删除标记的档位
+    for dk in del_keys:
+        if dk in current_tiers:
+            del current_tiers[dk]
+            if dk in edited_tiers:
+                del edited_tiers[dk]
+            st.rerun()
 
-    edited_penalties = {}
-    pcols = st.columns(5)
-    for i, pk in enumerate(penalty_keys):
-        with pcols[i]:
-            with st.container(border=True):
-                st.caption(pk)
-                cp = current_penalties.get(pk, 0.15)
-                val = st.slider("扣分比例", 0.0, 0.4, float(cp),
-                                step=0.05, key=f"pen_{pk}", disabled=not is_editable)
-                edited_penalties[pk] = val
-
-    # 分数示例
-    with st.expander("💡 分数预览（满分20分的题）", expanded=False):
-        st.caption("主题档位 × 素材扣分组合效果：")
+    # 分数预览
+    with st.expander("分数预览（20分题）", expanded=False):
         ec = st.columns(4)
-        for ei, tk in enumerate(tier_keys):
-            td = edited_tiers.get(tk, {"ratio_min": 0.5, "ratio_max": 1.0})
+        for ei, (tk, td) in enumerate(edited_tiers.items()):
             with ec[ei % 4]:
-                base = f"{int(20 * td['ratio_min'])}-{int(20 * td['ratio_max'])}"
-                st.metric(f"【{tk}】", f"{base}分")
-        st.caption("— 叠加素材扣分后（以 贴合主题 为例）—")
-        fc = st.columns(5)
-        for fi, pk in enumerate(penalty_keys):
-            pp = edited_penalties.get(pk, 0)
-            ti = edited_tiers.get("贴合主题", {"ratio_min": 0.9})
-            lo = max(0, int(20 * (ti["ratio_min"] - pp)))
-            hi = max(1, int(20 * (1.0 - pp)))
-            with fc[fi % 5]:
-                st.metric(f"+{pk}", f"{lo}-{hi}分", delta=f"-{int(pp*100)}%")
+                lo = int(20 * td["ratio_min"])
+                hi = int(20 * td["ratio_max"])
+                st.metric(tk, f"{lo}-{hi}分")
 
-    # 保存按钮
+    # 保存
     st.divider()
     cs1, cs2, cs3 = st.columns([1.2, 1.2, 2])
     with cs1:
-        if st.button("💾 保存当前配置", type="primary", use_container_width=True,
-                     disabled=not is_editable):
+        if st.button("💾 保存", type="primary", use_container_width=True, disabled=not is_editable):
             config.setdefault("grading", {})["mode"] = "custom" if sel == "custom" else sel
             config["grading"]["tiers"] = edited_tiers
-            config["grading"]["material_penalties"] = edited_penalties
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
             st.session_state.grading_mode = "custom" if sel == "custom" else sel
-            st.success("已保存！")
+            st.success("已保存")
             st.rerun()
     with cs2:
         if is_editable:
-            preset_name = st.text_input("预设名称", placeholder="例如：我的评分方案", key="preset_name")
-            if st.button("💾 另存为新预设", use_container_width=True,
-                         disabled=not preset_name):
-                config.setdefault("custom_presets", {})[preset_name] = {
-                    "desc": preset_name,
-                    "tiers": edited_tiers,
-                    "material_penalties": edited_penalties,
-                }
-                config["grading"]["mode"] = preset_name
+            pn = st.text_input("预设名称", placeholder="如：我的方案", key="preset_name")
+            if st.button("💾 另存为预设", use_container_width=True, disabled=not pn):
+                config.setdefault("custom_presets", {})[pn] = {"desc": pn, "tiers": edited_tiers}
+                config["grading"]["mode"] = pn
                 with open(config_path, "w", encoding="utf-8") as f:
                     yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-                st.session_state.grading_mode = preset_name
-                st.success(f"预设「{preset_name}」已保存！")
+                st.session_state.grading_mode = pn
+                st.success(f"「{pn}」已保存")
                 st.rerun()
     with cs3:
         if sel in custom_keys:
-            if st.button("🗑 删除此预设", use_container_width=True):
+            if st.button("🗑 删除预设", use_container_width=True):
                 config.setdefault("custom_presets", {}).pop(sel, None)
                 config["grading"]["mode"] = "relaxed"
                 with open(config_path, "w", encoding="utf-8") as f:
@@ -243,7 +199,7 @@ with tab2:
                     q["name"] = st.text_input("名称", value=q.get("name", ""), key=f"qn_{qi}")
                 with c2:
                     gtypes = ["text", "vision", "code", "hybrid"]
-                    gn = {"text": "文字生成", "vision": "图像/视频", "code": "纯代码(零token)", "hybrid": "智能体"}
+                    gn = {"text": "文字生成", "vision": "图像/视频", "code": "纯代码", "hybrid": "智能体"}
                     cur = q.get("grading_type", "text")
                     gi = gtypes.index(cur) if cur in gtypes else 0
                     q["grading_type"] = st.selectbox("评分类型", gtypes, index=gi,
@@ -254,7 +210,7 @@ with tab2:
 
                 kws = st.text_input("切题关键词（逗号分隔）",
                                      value=", ".join(q.get("topic_keywords", [])),
-                                     key=f"qkws_{qi}", placeholder="例如：茶艺, 茶文化, 茶道")
+                                     key=f"qkws_{qi}", placeholder="如：茶艺, 茶文化, 茶道")
                 q["topic_keywords"] = [k.strip() for k in kws.split(",") if k.strip()]
 
             st.caption("评分项")
@@ -281,11 +237,11 @@ with tab2:
                     criteria.append({"id": f"{q['id']}-{len(criteria)+1}", "name": "新评分项", "max": 5, "desc": ""})
                     st.rerun()
             with bc2:
-                if len(criteria) > 1 and st.button("➖ 删最后一项", key=f"delc_{qi}", use_container_width=True):
+                if len(criteria) > 1 and st.button("➖ 删最后项", key=f"delc_{qi}", use_container_width=True):
                     criteria.pop()
                     st.rerun()
             with bc3:
-                st.caption(f"共 {len(criteria)} 项 · 满分合计 {sum(c['max'] for c in criteria)}")
+                st.caption(f"{len(criteria)} 项 · 合计 {sum(c['max'] for c in criteria)}")
 
     st.divider()
     bc3, bc4, bc5 = st.columns(3)
@@ -310,7 +266,7 @@ with tab2:
             with open(rubric_path, "w", encoding="utf-8") as f:
                 json.dump(rubric, f, ensure_ascii=False, indent=2)
             st.session_state.rubric = rubric
-            st.success("题目配置已保存！")
+            st.success("已保存")
             st.rerun()
 
 # ============================================================
@@ -325,7 +281,7 @@ with tab3:
         st.info("当前没有 code 类型题目。在「题目 & 权重」中将题目评分类型改为「纯代码」即可。")
     else:
         for q in cqs:
-            with st.expander(f"Q{q['id']} {q['name']} — 数据检查"):
+            with st.expander(f"Q{q['id']} {q['name']}"):
                 checks = q.get("data_checks") or {}
                 if not checks:
                     checks = {}
@@ -369,4 +325,4 @@ with tab3:
             with open(rubric_path, "w", encoding="utf-8") as f:
                 json.dump(rubric, f, ensure_ascii=False, indent=2)
             st.session_state.rubric = rubric
-            st.success("已保存！")
+            st.success("已保存")

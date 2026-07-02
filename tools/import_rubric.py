@@ -1,9 +1,6 @@
 """
-从评分标准 .docx 自动生成 data/rubric.json（增强版）。
-LLM 一次性提取：题目结构 + grading_type + topic_keywords + submission_labels + data_checks。
-
+从评分标准 .docx 自动生成 data/rubric.json。
 用法: python tools/import_rubric.py "评分标准.docx"
-      python tools/import_rubric.py "评分标准.docx" -o custom_rubric.json
 """
 import sys, os, re, json, argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -13,16 +10,12 @@ import yaml
 
 
 def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
-    """读评分标准 docx，调 LLM 结构化，输出增强版 rubric.json"""
     config = yaml.safe_load(open("config.yaml", encoding="utf-8"))
-    # 结构化提取用低温，提高确定性
     config.setdefault("llm", {})["temperature"] = 0.05
     llm.init_llm(config.get("llm", {}))
 
-    # 提取文档内容
     paper = extract(docx_path, "output/_rubric_temp")
 
-    # 取所有表格
     all_tables = ""
     for ti, table in enumerate(paper["tables"]):
         rows_text = []
@@ -33,10 +26,9 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
         if rows_text:
             all_tables += f"\n--- 表格{ti} ---\n" + "\n".join(rows_text)
 
-    # 取段落
     paragraphs = "\n".join(text for _, text in paper["paragraphs"] if text.strip())
 
-    prompt = f"""你是评分标准结构化提取工具。从以下课程考核文档中提取完整的评分标准，输出严格 JSON。
+    prompt = f"""你是评分标准结构化提取工具。从课程考核文档提取完整评分标准，输出 JSON。
 
 ===== 文档段落 =====
 {paragraphs[:6000]}
@@ -44,65 +36,43 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
 ===== 文档表格 =====
 {all_tables[:10000]}
 
-===== 输出格式（直接JSON，不要markdown代码块）=====
+===== 输出 JSON 格式 =====
 {{
   "exam": {{
     "name": "课程名",
-    "semester": "学期（如2025-2026学年第二学期）",
+    "semester": "学期",
     "total_score": 100,
-    "time_limit": "考试时长（如90分钟）"
+    "time_limit": "时长"
   }},
   "questions": [
     {{
       "id": 1,
-      "name": "题目名称（如：文本生成）",
+      "name": "题目名",
       "max_score": 15,
-      "description": "题目要求和主题的一句话描述",
+      "description": "题目描述",
       "grading_type": "text",
-      "topic_keywords": ["主题核心词1", "主题核心词2"],
+      "topic_keywords": ["关键词1", "关键词2"],
       "submission_labels": [
         {{"label": "提示词", "field": "prompt_text"}},
         {{"label": "生成结果", "field": "result_text", "type": "text_or_image"}}
       ],
       "data_checks": null,
       "criteria": [
-        {{"id": "1-1", "name": "得分项名称", "max": 5, "desc": "得分标准描述"}}
+        {{"id": "1-1", "name": "得分项", "max": 5, "desc": "标准描述"}}
       ]
     }}
   ]
 }}
 
-===== 字段填写规则 =====
+===== 规则 =====
+1. grading_type: code/vision/text/hybrid 之一
+2. topic_keywords: 3-10个核心主题词，判断切题用。纯技术题给[]
+3. submission_labels: 从提交材料提取，field取prompt_text/result_text/image_prompt/video_prompt/persona_text
+4. data_checks: 仅code题填写，含dedup/fillna/date_format/sort
+5. criteria: 各项max之和等于该题max_score
+6. id格式: "题号-序号"
 
-1. grading_type（必填，从以下4种中选择）：
-   - "code": 纯数据处理题（涉及Excel/数据清洗/去重/补空/格式统一），可用pandas自动检测
-   - "vision": 涉及图片/海报/视频/设计，需要评估视觉质量
-   - "text": 纯文字生成题，评估提示词和文案
-   - "hybrid": 智能体/机器人搭建，需要评估截图+链接+逻辑
-
-2. topic_keywords（必填，3-10个）：
-   - 从题目描述中提取核心主题关键词，用于判断学生是否"切题"
-   - 例如茶艺题→["茶艺","茶文化","茶道","茶叶","泡茶","茶器","茶饮","茶","茗"]
-   - 航天题→["文昌","航天","火箭","发射","卫星","空间站","太空","宇宙"]
-   - 如果没有明确主题词（如纯技术题），给空数组[]
-
-3. submission_labels（必填）：
-   - 从"提交材料/提交要求"中提取每项对应的标签
-   - label: 学生表格中的标签文字
-   - field: 对应字段名（prompt_text/result_text/image_prompt/video_prompt/persona_text）
-   - type（可选）: "text"=纯文本, "text_or_image"=文本或截图, "image"=图片, "video"=视频
-
-4. data_checks（仅 grading_type="code" 时填写，否则 null）：
-   - 包含去重/补空/日期格式/排序等检查项
-   - 格式示例：
-     {{"dedup": true, "fillna": {{"column_pattern": "金额|价"}}, "date_format": {{"column_pattern": "日期|时间", "format": "YYYY-MM-DD"}}, "sort": {{"column_pattern": "日期"}}}}
-   - 如果题目没有明确的数据检查要求，给 {{}}
-
-5. criteria（必填）：
-   - 每个 criterion 的 max 之和应等于该题的 max_score
-   - id 格式："题号-序号" 如 "1-1", "1-2"
-
-直接输出 JSON，不要任何解释文字。"""
+直接输出 JSON。"""
 
     rubric = None
     for attempt in range(2):
@@ -112,19 +82,17 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
         if rubric and "questions" in rubric and len(rubric.get("questions", [])) > 0:
             break
         if attempt == 0:
-            print(f"[RETRY] JSON解析失败，重试中...")
+            print("[RETRY] 解析失败，重试...")
     else:
-        print("[ERR] LLM 返回无法解析，请检查评分标准 docx 格式")
-        print(f"原始返回: {raw[:500]}")
+        print("[ERR] 无法解析 LLM 返回")
+        print(f"返回: {raw[:500]}")
         sys.exit(1)
 
-    # 校验必要字段
     if "questions" not in rubric:
         rubric["questions"] = []
     if "exam" not in rubric:
         rubric["exam"] = {"name": "未知课程", "semester": "", "total_score": 100, "time_limit": ""}
 
-    # 为每道题补全缺失字段 + 验证 criteria 总分
     for q in rubric["questions"]:
         q.setdefault("grading_type", "text")
         q.setdefault("topic_keywords", [])
@@ -133,10 +101,8 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
         for i, c in enumerate(q.get("criteria", [])):
             if "id" not in c or not c["id"]:
                 c["id"] = f"{q['id']}-{i+1}"
-        # 后验证：criteria 总分与 max_score 不匹配时自动修正
         _fix_criteria_sum(q)
 
-    # 计算总分
     total = rubric["exam"].get("total_score", 0)
     if total == 0:
         total = sum(q.get("max_score", 0) for q in rubric["questions"])
@@ -146,20 +112,17 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(rubric, f, ensure_ascii=False, indent=2)
 
-    # 统计输出
     q_count = len(rubric["questions"])
     code_count = sum(1 for q in rubric["questions"] if q.get("grading_type") == "code")
-    llm_count = q_count - code_count
-    print(f"[OK] 已生成 {output_path}")
+    print(f"[OK] {output_path}")
     print(f"     课程: {rubric['exam']['name']} | {q_count}道题 | 满分{rubric['exam']['total_score']}")
-    print(f"     题型: {code_count}道纯代码(0 token) + {llm_count}道LLM评分")
+    print(f"     题型: {code_count}道代码 + {q_count - code_count}道LLM")
     for q in rubric["questions"]:
         kws = q.get("topic_keywords", [])
         labels = [sl.get("label", "") for sl in q.get("submission_labels", [])]
         print(f"     Q{q['id']} {q['name']}({q['max_score']}分) [{q.get('grading_type','?')}] "
               f"关键词={kws[:5]} 标签={labels}")
 
-    # 清理临时目录
     import shutil
     if os.path.isdir("output/_rubric_temp"):
         shutil.rmtree("output/_rubric_temp", ignore_errors=True)
@@ -168,48 +131,36 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
 
 
 def _fix_criteria_sum(q: dict):
-    """后验证：criteria 各项 max 之和必须等于 max_score，不匹配时按比例调整"""
     criteria = q.get("criteria", [])
-    if not criteria:
-        return
-    max_score = q.get("max_score", 0)
-    if max_score <= 0:
-        return
-    current_sum = sum(c.get("max", 0) for c in criteria)
-    if current_sum == max_score:
-        return  # 正确，无需修正
-    if current_sum <= 0:
-        return
-    # 按比例缩放并取整，差额分配给第一项
+    if not criteria: return
+    ms = q.get("max_score", 0)
+    if ms <= 0: return
+    cs = sum(c.get("max", 0) for c in criteria)
+    if cs == ms: return
+    if cs <= 0: return
     for c in criteria:
-        c["max"] = max(1, int(c["max"] * max_score / current_sum))
-    # 取整误差分配给第一项
-    new_sum = sum(c["max"] for c in criteria)
-    diff = max_score - new_sum
+        c["max"] = max(1, int(c["max"] * ms / cs))
+    diff = ms - sum(c["max"] for c in criteria)
     if diff != 0 and criteria:
         criteria[0]["max"] += diff
-    print(f"  [FIX] Q{q.get('id','?')} criteria{current_sum}→{max_score}（已自动修正）")
+    print(f"  [FIX] Q{q.get('id','?')} criteria {cs}→{ms}")
 
 
 def _parse_json(text: str) -> dict:
-    """从 LLM 回复中提取 JSON"""
-    # 尝试直接解析
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # 尝试 ```json ... ``` 代码块
-    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if match:
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if m:
         try:
-            return json.loads(match.group(1))
+            return json.loads(m.group(1))
         except json.JSONDecodeError:
             pass
-    # 尝试匹配最外层花括号
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
+    m = re.search(r'\{[\s\S]*\}', text)
+    if m:
         try:
-            return json.loads(match.group(0))
+            return json.loads(m.group(0))
         except json.JSONDecodeError:
             pass
     return {}
@@ -217,12 +168,10 @@ def _parse_json(text: str) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="从评分标准docx生成rubric.json")
-    parser.add_argument("docx", help="评分标准.docx 文件路径")
-    parser.add_argument("-o", "--output", default="data/rubric.json", help="输出路径（默认data/rubric.json）")
+    parser.add_argument("docx", help="评分标准.docx")
+    parser.add_argument("-o", "--output", default="data/rubric.json", help="输出路径")
     args = parser.parse_args()
-
     if not os.path.exists(args.docx):
         print(f"文件不存在: {args.docx}")
         sys.exit(1)
-
     parse_rubric_docx(args.docx, args.output)

@@ -13,25 +13,27 @@ grading:
     贴合主题:
       ratio_min: 0.9
       ratio_max: 1.0
-      desc: 主题匹配，内容完整
     跑题:
       ratio_min: 0.45
       ratio_max: 0.55
-      desc: 主题不匹配
+    有视频:
+      ratio_min: 0.8
+      ratio_max: 0.95
+    无视频:
+      ratio_min: 0.5
+      ratio_max: 0.65
+    有截图:
+      ratio_min: 0.7
+      ratio_max: 0.85
+    无截图:
+      ratio_min: 0.5
+      ratio_max: 0.65
     敷衍:
       ratio_min: 0.4
       ratio_max: 0.5
-      desc: 内容过少
     空:
       ratio_min: 0.0
       ratio_max: 0.0
-      desc: 无内容
-  material_penalties:
-    仅截图: 0.15
-    无视频: 0.15
-    无图像: 0.15
-    无表格: 0.15
-    无链接: 0.1
   code_base_ratio: 0.6
 custom_presets: {}
 image:
