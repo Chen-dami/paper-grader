@@ -74,9 +74,10 @@ with tab1:
     if sel in builtin_keys:
         st.session_state.grading_mode = sel
         current_tiers = {}
-        for tk, (rmin, rmax) in builtin_tiers[sel].items():
-            if tk != "desc":
-                current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
+        for tk, v in builtin_tiers[sel].items():
+            if tk == "desc": continue
+            rmin, rmax = v
+            current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
         is_editable = False
     elif sel in custom_keys:
         st.session_state.grading_mode = sel
