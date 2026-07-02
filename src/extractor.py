@@ -219,6 +219,51 @@ def _try_extract_ole_native(data: bytes) -> bytes | None:
     return None
 
 
+def extract_from_student_folder(docx_path: str, output_dir: str = "output",
+                                supplementary_files: dict | None = None) -> dict:
+    """
+    从学生文件夹提取试卷 —— 正常解析 docx，同时将文件夹中的
+    辅助文件（图片、Excel）注入到提取结果中。
+
+    supplementary_files = {
+        "images": ["/path/to/img1.png", ...],
+        "excel": ["/path/to/data.xlsx", ...],
+    }
+    """
+    paper = extract(docx_path, output_dir)
+    paper_dir = paper["paper_dir"]
+
+    if supplementary_files:
+        img_dir = os.path.join(paper_dir, "images")
+        embed_dir = os.path.join(paper_dir, "embeddings")
+        os.makedirs(img_dir, exist_ok=True)
+        os.makedirs(embed_dir, exist_ok=True)
+
+        # 注入文件夹中的独立图片
+        for img_path in supplementary_files.get("images", []):
+            if not os.path.exists(img_path):
+                continue
+            fname = os.path.basename(img_path)
+            dest = os.path.join(img_dir, fname)
+            if not os.path.exists(dest):
+                shutil.copy2(img_path, dest)
+            size = os.path.getsize(dest)
+            w, h = _get_image_size(open(dest, "rb").read(), fname)
+            paper["images"].append((dest, w, h, size))
+
+        # 注入文件夹中的独立 Excel
+        for xlsx_path in supplementary_files.get("excel", []):
+            if not os.path.exists(xlsx_path):
+                continue
+            fname = os.path.basename(xlsx_path)
+            dest = os.path.join(embed_dir, fname)
+            if not os.path.exists(dest):
+                shutil.copy2(xlsx_path, dest)
+            paper["embedded_files"].append((dest, os.path.splitext(fname)[1]))
+
+    return paper
+
+
 def _parse_student_info(paragraphs: list, tables: list) -> dict:
     """从段落和表格中提取学生信息"""
     info = {"学号": "", "姓名": "", "班级": ""}
