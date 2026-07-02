@@ -15,6 +15,8 @@ import yaml
 def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
     """读评分标准 docx，调 LLM 结构化，输出增强版 rubric.json"""
     config = yaml.safe_load(open("config.yaml", encoding="utf-8"))
+    # 结构化提取用低温，提高确定性
+    config.setdefault("llm", {})["temperature"] = 0.05
     llm.init_llm(config.get("llm", {}))
 
     # 提取文档内容
@@ -37,10 +39,10 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
     prompt = f"""你是评分标准结构化提取工具。从以下课程考核文档中提取完整的评分标准，输出严格 JSON。
 
 ===== 文档段落 =====
-{paragraphs[:3000]}
+{paragraphs[:6000]}
 
 ===== 文档表格 =====
-{all_tables[:5000]}
+{all_tables[:10000]}
 
 ===== 输出格式（直接JSON，不要markdown代码块）=====
 {{
@@ -102,12 +104,16 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
 
 直接输出 JSON，不要任何解释文字。"""
 
-    result = llm.grade_with_text(prompt, 0)
-    raw = result.get("raw_response", "")
-
-    # 解析 JSON
-    rubric = _parse_json(raw)
-    if not rubric:
+    rubric = None
+    for attempt in range(2):
+        result = llm.grade_with_text(prompt, 0)
+        raw = result.get("raw_response", "")
+        rubric = _parse_json(raw)
+        if rubric and "questions" in rubric and len(rubric.get("questions", [])) > 0:
+            break
+        if attempt == 0:
+            print(f"[RETRY] JSON解析失败，重试中...")
+    else:
         print("[ERR] LLM 返回无法解析，请检查评分标准 docx 格式")
         print(f"原始返回: {raw[:500]}")
         sys.exit(1)
@@ -118,16 +124,17 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
     if "exam" not in rubric:
         rubric["exam"] = {"name": "未知课程", "semester": "", "total_score": 100, "time_limit": ""}
 
-    # 为每道题补全缺失字段
+    # 为每道题补全缺失字段 + 验证 criteria 总分
     for q in rubric["questions"]:
         q.setdefault("grading_type", "text")
         q.setdefault("topic_keywords", [])
         q.setdefault("submission_labels", [])
         q.setdefault("data_checks", None if q.get("grading_type") != "code" else {})
-        # 确保 criteria id 格式正确
         for i, c in enumerate(q.get("criteria", [])):
             if "id" not in c or not c["id"]:
                 c["id"] = f"{q['id']}-{i+1}"
+        # 后验证：criteria 总分与 max_score 不匹配时自动修正
+        _fix_criteria_sum(q)
 
     # 计算总分
     total = rubric["exam"].get("total_score", 0)
@@ -158,6 +165,30 @@ def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
         shutil.rmtree("output/_rubric_temp", ignore_errors=True)
 
     return rubric
+
+
+def _fix_criteria_sum(q: dict):
+    """后验证：criteria 各项 max 之和必须等于 max_score，不匹配时按比例调整"""
+    criteria = q.get("criteria", [])
+    if not criteria:
+        return
+    max_score = q.get("max_score", 0)
+    if max_score <= 0:
+        return
+    current_sum = sum(c.get("max", 0) for c in criteria)
+    if current_sum == max_score:
+        return  # 正确，无需修正
+    if current_sum <= 0:
+        return
+    # 按比例缩放并取整，差额分配给第一项
+    for c in criteria:
+        c["max"] = max(1, int(c["max"] * max_score / current_sum))
+    # 取整误差分配给第一项
+    new_sum = sum(c["max"] for c in criteria)
+    diff = max_score - new_sum
+    if diff != 0 and criteria:
+        criteria[0]["max"] += diff
+    print(f"  [FIX] Q{q.get('id','?')} criteria{current_sum}→{max_score}（已自动修正）")
 
 
 def _parse_json(text: str) -> dict:

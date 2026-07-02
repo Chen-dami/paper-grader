@@ -75,26 +75,57 @@ with tab1:
     if not tiers:
         tiers = {}
         config.setdefault("grading", {})["tiers"] = tiers
+    penalties = config.get("grading", {}).get("material_penalties", {})
+
+    # 内置预设定义
+    builtin_tiers = {
+        "relaxed": {
+            "贴合主题": (0.90, 1.0), "跑题": (0.45, 0.55), "敷衍": (0.40, 0.50), "空": (0, 0),
+            "desc": "鼓励为主，有做就给高分",
+        },
+        "normal": {
+            "贴合主题": (0.80, 1.0), "跑题": (0.35, 0.50), "敷衍": (0.30, 0.45), "空": (0, 0),
+            "desc": "平衡鼓励与要求",
+        },
+        "strict": {
+            "贴合主题": (0.75, 1.0), "跑题": (0.25, 0.40), "敷衍": (0.20, 0.35), "空": (0, 0),
+            "desc": "有错必扣，高分只给优秀",
+        },
+    }
+    builtin_penalties = {
+        "relaxed": {"仅截图": 0.10, "无视频": 0.10, "无图像": 0.10, "无表格": 0.10, "无链接": 0.05},
+        "normal":  {"仅截图": 0.15, "无视频": 0.15, "无图像": 0.15, "无表格": 0.15, "无链接": 0.10},
+        "strict":  {"仅截图": 0.20, "无视频": 0.20, "无图像": 0.20, "无表格": 0.20, "无链接": 0.15},
+    }
+
+    tier_keys = ["贴合主题", "跑题", "敷衍", "空"]
+    penalty_keys = ["仅截图", "无视频", "无图像", "无表格", "无链接"]
 
     # 确定当前编辑的档位值
     if sel in builtin_keys:
         st.session_state.grading_mode = sel
         current_tiers = {}
-        for tk in ["切题", "切题_截图", "切题_无视频", "切题_无链接", "跑题", "敷衍", "空"]:
-            p = builtin_tiers[sel]
-            rmin, rmax = p.get(tk, (0.5, 1.0))
+        for tk in tier_keys:
+            rmin, rmax = builtin_tiers[sel].get(tk, (0.5, 1.0))
             current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
+        current_penalties = dict(builtin_penalties.get(sel, builtin_penalties["normal"]))
         is_editable = False
     elif sel in custom_keys:
         st.session_state.grading_mode = sel
-        current_tiers = deepcopy(custom_presets[sel]["tiers"])
+        preset = custom_presets[sel]
+        current_tiers = deepcopy(preset.get("tiers", {}))
+        current_penalties = deepcopy(preset.get("material_penalties", {}))
         is_editable = True
     else:  # "custom"
         st.session_state.grading_mode = "custom"
         current_tiers = deepcopy(tiers)
-        for tk in ["切题", "切题_截图", "切题_无视频", "切题_无链接", "跑题", "敷衍", "空"]:
+        current_penalties = deepcopy(penalties)
+        for tk in tier_keys:
             if tk not in current_tiers:
                 current_tiers[tk] = {"ratio_min": 0.7, "ratio_max": 0.9, "desc": ""}
+        for pk in penalty_keys:
+            if pk not in current_penalties:
+                current_penalties[pk] = 0.15
         is_editable = True
 
     mode_label = custom_presets[sel].get("desc", sel) if sel in custom_keys else mode_names.get(sel, sel)
@@ -102,39 +133,58 @@ with tab1:
 
     st.divider()
 
-    # 档位滑块
-    tier_labels = {"切题": "切题", "切题_截图": "切题(仅截图)", "切题_无视频": "切题(无视频)",
-                   "切题_无链接": "切题(无链接)", "跑题": "跑题", "敷衍": "敷衍", "空": "空"}
-    edited_tiers = {}
+    # ===== 主题档位区 =====
+    st.subheader("📊 主题档位")
+    st.caption("判定规则：贴合主题（关键词≥2匹配）→ 跑题（关键词不足）→ 敷衍（内容过少）→ 空（无内容）")
 
-    tkeys = list(tier_labels.keys())
-    for i in range(0, len(tkeys), 2):
-        cols = st.columns(2)
-        for j in range(2):
-            if i + j >= len(tkeys):
-                break
-            tk = tkeys[i + j]
-            with cols[j]:
-                with st.container(border=True):
-                    st.caption(tier_labels[tk])
-                    td = current_tiers.get(tk, {"ratio_min": 0.7, "ratio_max": 0.9})
-                    rmin = st.slider("最低比例", 0.0, 1.0,
-                                     float(td.get("ratio_min", 0.7)),
-                                     step=0.05, key=f"mtmin_{tk}",
-                                     disabled=not is_editable)
-                    rmax = st.slider("最高比例", 0.0, 1.0,
-                                     float(td.get("ratio_max", 0.9)),
-                                     step=0.05, key=f"mtmax_{tk}",
-                                     disabled=not is_editable)
-                    edited_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
+    edited_tiers = {}
+    tcols = st.columns(4)
+    for i, tk in enumerate(tier_keys):
+        with tcols[i]:
+            with st.container(border=True):
+                st.caption(tk)
+                td = current_tiers.get(tk, {"ratio_min": 0.7, "ratio_max": 0.9})
+                rmin = st.slider("最低", 0.0, 1.0, float(td.get("ratio_min", 0.7)),
+                                 step=0.05, key=f"tmin_{tk}", disabled=not is_editable)
+                rmax = st.slider("最高", 0.0, 1.0, float(td.get("ratio_max", 0.9)),
+                                 step=0.05, key=f"tmax_{tk}", disabled=not is_editable)
+                edited_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
+
+    st.divider()
+
+    # ===== 素材扣分区 =====
+    st.subheader("📎 素材扣分")
+    st.caption("每个缺失标记从基础分中扣除对应比例，可多个叠加。空提交不参与素材扣分。")
+
+    edited_penalties = {}
+    pcols = st.columns(5)
+    for i, pk in enumerate(penalty_keys):
+        with pcols[i]:
+            with st.container(border=True):
+                st.caption(pk)
+                cp = current_penalties.get(pk, 0.15)
+                val = st.slider("扣分比例", 0.0, 0.4, float(cp),
+                                step=0.05, key=f"pen_{pk}", disabled=not is_editable)
+                edited_penalties[pk] = val
 
     # 分数示例
-    with st.expander("分数示例（满分20分的题）", expanded=False):
+    with st.expander("💡 分数预览（满分20分的题）", expanded=False):
+        st.caption("主题档位 × 素材扣分组合效果：")
         ec = st.columns(4)
-        for ei, (tk, tn) in enumerate(tier_labels.items()):
+        for ei, tk in enumerate(tier_keys):
             td = edited_tiers.get(tk, {"ratio_min": 0.5, "ratio_max": 1.0})
             with ec[ei % 4]:
-                st.metric(tn, f"{int(20 * td['ratio_min'])}-{int(20 * td['ratio_max'])}分")
+                base = f"{int(20 * td['ratio_min'])}-{int(20 * td['ratio_max'])}"
+                st.metric(f"【{tk}】", f"{base}分")
+        st.caption("— 叠加素材扣分后（以 贴合主题 为例）—")
+        fc = st.columns(5)
+        for fi, pk in enumerate(penalty_keys):
+            pp = edited_penalties.get(pk, 0)
+            ti = edited_tiers.get("贴合主题", {"ratio_min": 0.9})
+            lo = max(0, int(20 * (ti["ratio_min"] - pp)))
+            hi = max(1, int(20 * (1.0 - pp)))
+            with fc[fi % 5]:
+                st.metric(f"+{pk}", f"{lo}-{hi}分", delta=f"-{int(pp*100)}%")
 
     # 保存按钮
     st.divider()
@@ -144,6 +194,7 @@ with tab1:
                      disabled=not is_editable):
             config.setdefault("grading", {})["mode"] = "custom" if sel == "custom" else sel
             config["grading"]["tiers"] = edited_tiers
+            config["grading"]["material_penalties"] = edited_penalties
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
             st.session_state.grading_mode = "custom" if sel == "custom" else sel
@@ -157,6 +208,7 @@ with tab1:
                 config.setdefault("custom_presets", {})[preset_name] = {
                     "desc": preset_name,
                     "tiers": edited_tiers,
+                    "material_penalties": edited_penalties,
                 }
                 config["grading"]["mode"] = preset_name
                 with open(config_path, "w", encoding="utf-8") as f:
