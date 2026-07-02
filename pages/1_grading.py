@@ -46,7 +46,7 @@ with c2:
     else:
         st.info("请上传评分标准文档")
 
-if rubric_file:
+if rubric_file and not st.session_state.get("_parsing_done", False):
     fname = rubric_file.name.lower()
     suffix = os.path.splitext(fname)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -69,10 +69,12 @@ if rubric_file:
         if rubric:
             st.session_state.rubric = rubric
             st.session_state.rubric_path = rubric_path
+            st.session_state._parsing_done = True
             st.success(f"评分标准已解析：{rubric['exam']['name']} -- {len(rubric['questions'])}道题")
             st.rerun()
     except Exception as e:
         st.error(f"解析失败: {e}")
+        st.session_state._parsing_done = True
     finally:
         os.unlink(rubric_tmp)
 

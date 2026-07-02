@@ -94,8 +94,8 @@ def _zero_score(criteria: list, max_score: int, msg: str) -> dict:
 
 def _detect_tier(q_data: dict, question: dict, config: dict) -> str:
     """
-    用 topic_keywords 判断切题/跑题/敷衍/空。
-    返回档位名（如 "切题", "跑题", "敷衍"）。
+    用 topic_keywords 判断贴合主题/跑题/敷衍/空。
+    返回档位名（如 "贴合主题", "跑题", "敷衍"）。
     """
     keywords = question.get("topic_keywords", [])
     gtype = question.get("grading_type", "text")
@@ -134,18 +134,18 @@ def _detect_tier(q_data: dict, question: dict, config: dict) -> str:
     if gtype == "vision":
         video_expected = "视频" in name
         if video_expected and not has_video and not has_images:
-            return "切题_无素材"
+            return "无素材"
         elif video_expected and not has_video:
-            return "切题_无视频"
+            return "无视频"
         elif not has_images:
-            return "切题_无图像"
+            return "无图像"
 
     if result_is_screenshot:
-        return "切题_截图"
+        return "仅截图"
     elif gtype == "hybrid" and not has_link and has_topic:
-        return "切题_无链接"
+        return "无链接"
     else:
-        return "切题"
+        return "贴合主题"
 
 
 def _collect_text(q_data: dict, gtype: str) -> str:

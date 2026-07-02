@@ -21,7 +21,7 @@ st.markdown("""
                  letter-spacing:0.1em;">阅卷系统</span>
 </div>
 """, unsafe_allow_html=True)
-st.caption(f"欢迎，{teacher}老师 👋")
+st.caption(f"欢迎，{teacher} 👋")
 
 st.markdown("<br>", unsafe_allow_html=True)
 

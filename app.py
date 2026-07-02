@@ -36,7 +36,7 @@ if not st.session_state.authenticated:
                     users = load_users()
                     u = users.get(username, {})
                     st.session_state.authenticated = True
-                    st.session_state.teacher_name = f"{u.get('display_name', username)}教师"
+                    st.session_state.teacher_name = f"{u.get('display_name', username)}老师"
                     st.session_state.username = username
         except:
             pass
@@ -62,7 +62,7 @@ if not st.session_state.authenticated:
                 if result:
                     display_name, role = result
                     st.session_state.authenticated = True
-                    st.session_state.teacher_name = f"{display_name}教师"
+                    st.session_state.teacher_name = f"{display_name}老师"
                     st.session_state.username = username
                     os.makedirs("data", exist_ok=True)
                     with open("data/.session_token", "w") as f:
@@ -141,7 +141,7 @@ with st.sidebar:
     # 个人信息
     with st.expander("👤 个人信息"):
         st.caption(f"姓名：{teacher}")
-        st.caption(f"角色：阅卷教师")
+        st.caption(f"角色：阅卷老师")
         st.caption(f"当前模式：{mode_labels.get(cur_mode, cur_mode)}")
         new_pw = st.text_input("修改密码", type="password", key="sb_pwd")
         if new_pw and st.button("确认修改", key="sb_pwd_btn"):

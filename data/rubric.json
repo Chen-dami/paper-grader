@@ -1,119 +1,305 @@
 {
   "exam": {
-    "name": "数字媒体基础实践",
+    "name": "人工智能基础实践",
     "semester": "2025-2026学年第二学期",
     "total_score": 100,
-    "time_limit": "90分钟"
+    "time_limit": ""
   },
   "questions": [
     {
       "id": 1,
       "name": "文本生成",
-      "max_score": 15,
-      "description": "以茶艺传承为主题，写小红书/朋友圈种草文案，300字以内",
+      "max_score": 20,
+      "description": "以毕业季来三亚为主题，结合传统民俗、新潮海上项目或自然风光，创作一篇适合小红书或朋友圈发布的种草文案",
       "grading_type": "text",
-      "topic_keywords": ["茶艺", "茶文化", "茶道", "茶叶", "泡茶", "茶器", "茶饮", "茶", "茗"],
+      "topic_keywords": [
+        "毕业季",
+        "三亚",
+        "传统民俗",
+        "新潮海上项目",
+        "自然风光",
+        "种草文案",
+        "小红书",
+        "朋友圈"
+      ],
       "submission_labels": [
-        {"label": "提示词", "field": "prompt_text"},
-        {"label": "生成结果", "field": "result_text", "type": "text_or_image"},
-        {"label": "截图", "field": "screenshot"}
+        {
+          "label": "提示词",
+          "field": "prompt_text"
+        },
+        {
+          "label": "生成结果",
+          "field": "result_text",
+          "type": "text_or_image"
+        }
       ],
       "data_checks": null,
       "criteria": [
-        {"id": "1-1", "name": "主题契合度", "max": 5, "desc": "是否围绕茶艺主题，突出传统与创新结合"},
-        {"id": "1-2", "name": "文案质量与文笔", "max": 5, "desc": "语言流畅、有感染力，符合小红书/朋友圈风格"},
-        {"id": "1-3", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词结构清晰，提交材料齐全"}
+        {
+          "id": "1-1",
+          "name": "主题契合度",
+          "max": 8,
+          "desc": "文案紧密契合毕业季来三亚主题，结合传统民俗、新潮海上项目或自然风光"
+        },
+        {
+          "id": "1-2",
+          "name": "文案质量",
+          "max": 7,
+          "desc": "文案300字以内，适合小红书或朋友圈发布，具有种草效果"
+        },
+        {
+          "id": "1-3",
+          "name": "工具使用记录",
+          "max": 5,
+          "desc": "提交文本生成工具的使用记录（提示词和生成结果的截图）"
+        }
       ]
     },
     {
       "id": 2,
-      "name": "图像生成",
+      "name": "图像设计",
       "max_score": 20,
-      "description": "设计文昌航天发射场宣传海报，多模态工具生成",
+      "description": "借助生成式人工智能设计一张中国文昌航天发射场任务纪念宣传海报",
       "grading_type": "vision",
-      "topic_keywords": ["文昌", "航天", "火箭", "发射", "卫星", "空间站", "太空", "宇宙"],
+      "topic_keywords": [
+        "文昌",
+        "航天",
+        "发射场",
+        "任务纪念",
+        "宣传海报",
+        "辨识度高",
+        "视觉冲击力强",
+        "主题鲜明"
+      ],
       "submission_labels": [
-        {"label": "提示词", "field": "prompt_text"},
-        {"label": "生成", "field": "generated_images", "type": "image"},
-        {"label": "截图", "field": "process_screenshot", "type": "image"}
+        {
+          "label": "提示词",
+          "field": "image_prompt"
+        },
+        {
+          "label": "海报设计图",
+          "field": "result_image",
+          "type": "image"
+        },
+        {
+          "label": "AIGC平台截图",
+          "field": "screenshot",
+          "type": "image"
+        }
       ],
       "data_checks": null,
       "criteria": [
-        {"id": "2-1", "name": "主题契合度", "max": 5, "desc": "海报围绕文昌航天发射场主题"},
-        {"id": "2-2", "name": "模型使用合理性", "max": 5, "desc": "提示词结构合理，善用工具参数"},
-        {"id": "2-3", "name": "创意与艺术性", "max": 5, "desc": "视觉效果有创意，构图有设计感"},
-        {"id": "2-4", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词规范，材料齐全，过程完整"}
+        {
+          "id": "2-1",
+          "name": "主题契合度",
+          "max": 8,
+          "desc": "海报设计紧密契合中国文昌航天发射场任务纪念主题"
+        },
+        {
+          "id": "2-2",
+          "name": "视觉效果",
+          "max": 7,
+          "desc": "辨识度高、视觉冲击力强、主题鲜明"
+        },
+        {
+          "id": "2-3",
+          "name": "提交材料完整性",
+          "max": 5,
+          "desc": "提交提示词、海报设计图、AIGC平台生成海报设计图后的整个屏幕截图"
+        }
       ]
     },
     {
       "id": 3,
-      "name": "视频生成",
+      "name": "视频创作",
       "max_score": 20,
-      "description": "以黎族传统纺织技艺为主题，图生视频，非遗宣传",
+      "description": "运用生成式AI创作高清黎锦特写图像，并制作身着同款黎锦纹样服饰的人物出镜短视频",
       "grading_type": "vision",
-      "topic_keywords": ["黎族", "纺织", "织锦", "非遗", "文化遗产", "传统工艺", "黎锦"],
+      "topic_keywords": [
+        "黎锦",
+        "海南黎锦",
+        "特写图像",
+        "短视频",
+        "传统黎族服饰",
+        "实景背景",
+        "配音"
+      ],
       "submission_labels": [
-        {"label": "参考图", "field": "image_prompt"},
-        {"label": "图片提示词", "field": "image_prompt"},
-        {"label": "视频提示词", "field": "video_prompt"},
-        {"label": "生成", "field": "generated_image", "type": "image"},
-        {"label": "视频", "field": "video", "type": "video"}
+        {
+          "label": "生成图片的提示词",
+          "field": "image_prompt"
+        },
+        {
+          "label": "生成的图片",
+          "field": "result_image",
+          "type": "image"
+        },
+        {
+          "label": "生成视频的提示词",
+          "field": "video_prompt"
+        },
+        {
+          "label": "AI中图生视频页面截图",
+          "field": "screenshot",
+          "type": "image"
+        },
+        {
+          "label": "最终创作的完整视频文件",
+          "field": "result_video",
+          "type": "video"
+        }
       ],
       "data_checks": null,
       "criteria": [
-        {"id": "3-1", "name": "主题契合与文化准确", "max": 4, "desc": "突出黎族纺织核心特点，文化表达准确"},
-        {"id": "3-2", "name": "图片质量与构图", "max": 4, "desc": "参考图达标，构图合理"},
-        {"id": "3-3", "name": "视频完成度", "max": 7, "desc": "画面完整，与参考图同步，整体流畅"},
-        {"id": "3-4", "name": "提示词规范与材料完整", "max": 5, "desc": "提示词规范，材料齐全"}
+        {
+          "id": "3-1",
+          "name": "主题契合度",
+          "max": 6,
+          "desc": "契合主题，聚焦海南黎锦特色"
+        },
+        {
+          "id": "3-2",
+          "name": "图片质量",
+          "max": 5,
+          "desc": "图片纹理清晰、构图完整，无模糊或变形"
+        },
+        {
+          "id": "3-3",
+          "name": "视频质量",
+          "max": 5,
+          "desc": "视频人物身着印有该黎锦纹样的传统黎族服饰，搭配合适的实景背景和配音"
+        },
+        {
+          "id": "3-4",
+          "name": "提交材料完整性",
+          "max": 4,
+          "desc": "提交生成图片的提示词、生成的图片、生成视频的提示词、AI中图生视频的页面截图、最终创作的完整视频文件"
+        }
       ]
     },
     {
       "id": 4,
       "name": "数据处理",
       "max_score": 20,
-      "description": "处理Excel数据：去重、补空值、格式统一、排序",
+      "description": "借助AI技术完成Excel数据的智能处理、标注与简易经营分析，包括处理缺失值、重复项、统一格式并排序",
       "grading_type": "code",
       "topic_keywords": [],
       "submission_labels": [
-        {"label": "提示词", "field": "prompt_text"},
-        {"label": "Excel", "field": "excel", "type": "file"},
-        {"label": "截图", "field": "screenshot"}
+        {
+          "label": "提示词",
+          "field": "prompt_text"
+        },
+        {
+          "label": "AI生成内容的截图",
+          "field": "screenshot",
+          "type": "image"
+        },
+        {
+          "label": "处理好的Excel表格",
+          "field": "result_file",
+          "type": "text_or_image"
+        }
       ],
       "data_checks": {
+        "fillna": {
+          "column_pattern": "销售金额"
+        },
         "dedup": true,
-        "fillna": {"column_pattern": "金额|价|amount"},
-        "date_format": {"column_pattern": "日期|时间|date", "format": "YYYY-MM-DD"},
-        "sort": {"column_pattern": "日期|时间|date"}
+        "date_format": {
+          "column_pattern": "销售日期",
+          "format": "YYYY-MM-DD"
+        },
+        "sort": {
+          "column_pattern": "销售日期"
+        }
       },
       "criteria": [
-        {"id": "4-1", "name": "删除重复项", "max": 5, "desc": "去重正确，逻辑清晰，无错误和遗漏"},
-        {"id": "4-2", "name": "缺失值处理", "max": 5, "desc": "补空值正确，公式正确，无遗漏"},
-        {"id": "4-3", "name": "统一格式与排序", "max": 5, "desc": "日期格式统一为YYYY-MM-DD，按销售日期排序"},
-        {"id": "4-4", "name": "提示词规范与完成度", "max": 5, "desc": "提示词逻辑合理，提交材料完整"}
+        {
+          "id": "4-1",
+          "name": "缺失值处理",
+          "max": 6,
+          "desc": "利用公式填写销售金额列为空的值"
+        },
+        {
+          "id": "4-2",
+          "name": "重复项处理",
+          "max": 5,
+          "desc": "找出并删除销售数据原始表中完全重复的销售记录"
+        },
+        {
+          "id": "4-3",
+          "name": "格式统一与排序",
+          "max": 5,
+          "desc": "将销售日期统一为YYYY-MM-DD格式，并以销售日期升序排序"
+        },
+        {
+          "id": "4-4",
+          "name": "提交材料完整性",
+          "max": 4,
+          "desc": "提交提示词、AI生成内容的截图以及处理好的Excel表格"
+        }
       ]
     },
     {
       "id": 5,
-      "name": "智能体开发",
-      "max_score": 25,
-      "description": "用Coze搭建校园失物招领智能体，含知识库匹配",
+      "name": "智能体搭建",
+      "max_score": 20,
+      "description": "在扣子平台搭建一个校园失物招领助手智能体，能够根据用户描述快速检索知识库中的失物信息并匹配",
       "grading_type": "hybrid",
-      "topic_keywords": ["失物", "招领", "校园", "丢失", "拾到", "捡到", "物品", "学生卡", "失主"],
+      "topic_keywords": [
+        "校园失物招领",
+        "智能体",
+        "扣子平台",
+        "知识库",
+        "检索匹配"
+      ],
       "submission_labels": [
-        {"label": "人设", "field": "persona_text"},
-        {"label": "逻辑", "field": "persona_text"},
-        {"label": "角色", "field": "persona_text"},
-        {"label": "链接", "field": "bot_link"},
-        {"label": "coze", "field": "bot_link"},
-        {"label": "截图", "field": "screenshot"}
+        {
+          "label": "智能体人设与回复逻辑文本内容",
+          "field": "persona_text"
+        },
+        {
+          "label": "知识库预览页面截图",
+          "field": "screenshot",
+          "type": "image"
+        },
+        {
+          "label": "预览与调试后的智能体全屏幕截图",
+          "field": "screenshot",
+          "type": "image"
+        },
+        {
+          "label": "智能体发布后的链接",
+          "field": "result_link",
+          "type": "text_or_image"
+        }
       ],
       "data_checks": null,
       "criteria": [
-        {"id": "5-1", "name": "功能完整与流程", "max": 5, "desc": "节点配置正确，流程顺畅，能稳定协同运作"},
-        {"id": "5-2", "name": "人设逻辑规范", "max": 5, "desc": "人设描述清晰，逻辑规范"},
-        {"id": "5-3", "name": "知识库准确", "max": 5, "desc": "知识库内容准确，Excel数据正确导入"},
-        {"id": "5-4", "name": "交互功能", "max": 5, "desc": "欢迎语、预设问题、图片上传、数据库等功能"},
-        {"id": "5-5", "name": "使用效果与材料完整", "max": 5, "desc": "使用效果准确，提交材料完整"}
+        {
+          "id": "5-1",
+          "name": "人设与回复逻辑",
+          "max": 6,
+          "desc": "人设与回复逻辑完整，具体描述智能体的角色、技能等"
+        },
+        {
+          "id": "5-2",
+          "name": "知识库配置",
+          "max": 5,
+          "desc": "正确导入Excel，绑定失物招领知识库，实现精准检索匹配"
+        },
+        {
+          "id": "5-3",
+          "name": "功能完善性",
+          "max": 5,
+          "desc": "开场白文案、开场白预置问题、背景图片等内容合理"
+        },
+        {
+          "id": "5-4",
+          "name": "提交材料完整性",
+          "max": 4,
+          "desc": "提交智能体人设与回复逻辑文本内容、知识库预览页面截图、预览与调试后的智能体全屏幕截图、智能体发布后的链接"
+        }
       ]
     }
   ]
