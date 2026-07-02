@@ -12,6 +12,7 @@ import yaml
 def parse_rubric_docx(docx_path: str, output_path: str = "data/rubric.json"):
     config = yaml.safe_load(open("config.yaml", encoding="utf-8"))
     config.setdefault("llm", {})["temperature"] = 0.05
+    config["llm"]["max_tokens"] = 8192
     llm.init_llm(config.get("llm", {}))
 
     paper = extract(docx_path, "output/_rubric_temp")
