@@ -55,7 +55,6 @@ with tab1:
         tiers = {}
         config.setdefault("grading", {})["tiers"] = tiers
 
-    # 内置预设
     builtin_tiers = {
         "relaxed": {"贴合主题": (0.90, 1.0), "跑题": (0.45, 0.55),
                     "有视频": (0.80, 0.95), "无视频": (0.55, 0.65),
@@ -71,22 +70,26 @@ with tab1:
                     "敷衍": (0.20, 0.35), "空": (0, 0), "desc": "严格"},
     }
 
-    if sel in builtin_keys:
-        st.session_state.grading_mode = sel
-        current_tiers = {}
-        for tk, v in builtin_tiers[sel].items():
-            if tk == "desc": continue
-            rmin, rmax = v
-            current_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
-        is_editable = False
-    elif sel in custom_keys:
-        st.session_state.grading_mode = sel
-        current_tiers = deepcopy(custom_presets[sel].get("tiers", {}))
-        is_editable = True
-    else:
-        st.session_state.grading_mode = "custom"
-        current_tiers = deepcopy(tiers)
-        is_editable = True
+    # 模式切换时从源重新加载 working_tiers
+    last_sel = st.session_state.get("_last_mode_sel", "")
+    if sel != last_sel:
+        st.session_state._last_mode_sel = sel
+        if sel in builtin_keys:
+            wt = {}
+            for tk, v in builtin_tiers[sel].items():
+                if tk == "desc": continue
+                wt[tk] = {"ratio_min": v[0], "ratio_max": v[1], "desc": ""}
+            st.session_state.working_tiers = wt
+        elif sel in custom_keys:
+            st.session_state.working_tiers = deepcopy(custom_presets[sel].get("tiers", {}))
+        else:
+            st.session_state.working_tiers = deepcopy(tiers)
+
+    if "working_tiers" not in st.session_state:
+        st.session_state.working_tiers = deepcopy(tiers)
+
+    current_tiers = st.session_state.working_tiers
+    is_editable = sel not in builtin_keys
 
     mode_label = custom_presets[sel].get("desc", sel) if sel in custom_keys else mode_names.get(sel, sel)
     st.caption(f"当前：{mode_label}" + ("（预设，仅查看）" if not is_editable else "（可编辑）"))
@@ -94,37 +97,40 @@ with tab1:
     st.divider()
     st.subheader("档位设置")
 
-    # 编辑模式下的添加按钮
+    # 添加按钮
     if is_editable:
         ac1, ac2 = st.columns([1, 3])
         with ac1:
-            new_tier_name = st.text_input("新档位名", placeholder="如：有表格", key="new_tier_name")
+            new_name = st.text_input("新档位名", placeholder="如：有表格", key="new_tier_name")
         with ac2:
             st.caption("")
-            if st.button("➕ 添加档位", disabled=not new_tier_name, key="add_tier_btn"):
-                if new_tier_name not in current_tiers:
-                    current_tiers[new_tier_name] = {"ratio_min": 0.5, "ratio_max": 0.75, "desc": ""}
+            if st.button("➕ 添加", disabled=not new_name, key="add_tier_btn"):
+                if new_name not in current_tiers:
+                    current_tiers[new_name] = {"ratio_min": 0.5, "ratio_max": 0.75, "desc": ""}
+                    st.session_state.working_tiers = current_tiers
                     st.rerun()
 
-    # 档位列表
+    # 档位列表 — 每行2个
     edited_tiers = {}
     del_keys = []
     tkeys = list(current_tiers.keys())
-    for i in range(0, len(tkeys), 3):
-        cols = st.columns(3)
-        for j in range(3):
+    for i in range(0, len(tkeys), 2):
+        cols = st.columns(2)
+        for j in range(2):
             if i + j >= len(tkeys):
                 break
             tk = tkeys[i + j]
             with cols[j]:
                 with st.container(border=True):
-                    tc1, tc2 = st.columns([3, 1])
+                    tc1, tc2 = st.columns([4, 1])
                     with tc1:
                         st.caption(tk)
                     with tc2:
                         if is_editable and tk not in ("空", "敷衍", "跑题", "贴合主题"):
-                            if st.button("✕", key=f"del_{tk}", help=f"删除「{tk}」"):
-                                del_keys.append(tk)
+                            if st.button("✕", key=f"del_{tk}"):
+                                del current_tiers[tk]
+                                st.session_state.working_tiers = current_tiers
+                                st.rerun()
 
                     td = current_tiers.get(tk, {"ratio_min": 0.5, "ratio_max": 0.75})
                     rmin = st.slider("最低", 0.0, 1.0, float(td.get("ratio_min", 0.5)),
@@ -132,14 +138,8 @@ with tab1:
                     rmax = st.slider("最高", 0.0, 1.0, float(td.get("ratio_max", 0.75)),
                                      step=0.05, key=f"tmax_{tk}", disabled=not is_editable)
                     edited_tiers[tk] = {"ratio_min": rmin, "ratio_max": rmax, "desc": ""}
-
-    # 删除标记的档位
-    for dk in del_keys:
-        if dk in current_tiers:
-            del current_tiers[dk]
-            if dk in edited_tiers:
-                del edited_tiers[dk]
-            st.rerun()
+                    current_tiers[tk] = edited_tiers[tk]
+    st.session_state.working_tiers = current_tiers
 
     # 分数预览
     with st.expander("分数预览（20分题）", expanded=False):
@@ -160,6 +160,7 @@ with tab1:
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
             st.session_state.grading_mode = "custom" if sel == "custom" else sel
+            st.session_state.working_tiers = edited_tiers
             st.success("已保存")
             st.rerun()
     with cs2:
@@ -171,6 +172,8 @@ with tab1:
                 with open(config_path, "w", encoding="utf-8") as f:
                     yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
                 st.session_state.grading_mode = pn
+                st.session_state.working_tiers = edited_tiers
+                st.session_state._last_mode_sel = pn
                 st.success(f"「{pn}」已保存")
                 st.rerun()
     with cs3:
@@ -181,6 +184,8 @@ with tab1:
                 with open(config_path, "w", encoding="utf-8") as f:
                     yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
                 st.session_state.grading_mode = "relaxed"
+                st.session_state.working_tiers = {}
+                st.session_state._last_mode_sel = ""
                 st.success(f"已删除「{sel}」")
                 st.rerun()
 
