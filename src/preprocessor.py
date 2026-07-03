@@ -58,8 +58,17 @@ def process(paper_data: dict, rubric: dict, config: dict) -> dict:
     for q in rubric["questions"]:
         qid = q["id"]
         content_tables = table_map.get(qid, [])
-        q_data = _extract_question(content_tables, q, images,
-                                    excel_files, video_files, paragraphs)
+        try:
+            q_data = _extract_question(content_tables, q, images,
+                                        excel_files, video_files, paragraphs)
+        except Exception:
+            q_data = {
+                "prompt_text": "", "result_text": "", "image_prompt": "",
+                "video_prompt": "", "persona_text": "", "has_screenshot": False,
+                "has_video": False, "video_path": "", "has_excel_file": False,
+                "excel_path": "", "bot_link": "", "result_is_screenshot": False,
+                "all_table_text": "", "generated_images": [], "reference_image": None,
+            }
         result[f"q{qid}"] = q_data
 
     return result
@@ -71,57 +80,99 @@ def process(paper_data: dict, rubric: dict, config: dict) -> dict:
 
 def _match_tables_to_questions(tables: list, rubric: dict) -> dict:
     """
-    扫描所有表格，为每道题匹配内容表。
-
-    策略：
-    1. 找"标题表"：包含题目名称或"第X题"的小表
-    2. 标题表之后的第一个大表（>2行）视为内容表
-    3. 如果找不到标题表，用所有非得分表作为兜底
-
-    返回: {question_id: [content_table_rows, ...]}
+    两轮匹配：先精确子串，再字符级模糊。每个表头只分配给得分最高的题。
     """
     mapping = {}
     questions = rubric["questions"]
 
-    # 先标记跳过表（得分汇总表：含"题号/得分/总分/阅卷"等）
+    # 标记跳过表（仅跳过含"题号"或"总分"的得分汇总表，不过滤含"得分"的题目表头）
     skip_indices = set()
     for ti, table in enumerate(tables):
         first_row = " ".join(str(c) for c in (table[0] if table else []))
-        if any(kw in first_row for kw in ["题号", "得分", "总分", "阅卷人", "阅卷"]):
-            if len(table) <= 3:
-                skip_indices.add(ti)
+        if ("题号" in first_row or "总分" in first_row) and len(table) <= 3:
+            skip_indices.add(ti)
 
-    # 为每道题找标题表 + 内容表
+    def _match_score(text, qid, qname):
+        """返回匹配分数：2=精确子串, 1=模糊>=50%, 1=数字序号, 0=不匹配"""
+        if qname and len(qname) >= 2 and qname in text:
+            return 2
+        if qname and len(qname) >= 2:
+            hits = sum(1 for ch in qname if ch in text)
+            if hits / len(qname) >= 0.5:
+                return 1
+        cn_nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+        if qid < len(cn_nums):
+            for p in [f"第{qid}题", f"题{cn_nums[qid]}",
+                       f"{cn_nums[qid]}、", f"({cn_nums[qid]})", f"（{cn_nums[qid]}）"]:
+                if p in text:
+                    return 1
+        return 0
+
+    # 收集所有候选表头及其匹配
+    candidates = []  # [(ti, qid, score)]
+    for ti, table in enumerate(tables):
+        if ti in skip_indices or len(table) > 2:
+            continue
+        first_row = " ".join(str(c) for c in (table[0] if table else []))
+        best_q, best_score = None, 0
+        for q in questions:
+            s = _match_score(first_row, q["id"], q.get("name", ""))
+            if s > best_score:
+                best_q, best_score = q["id"], s
+        if best_q and best_score > 0:
+            candidates.append((ti, best_q, best_score))
+
+    # 每个题取最高分的表头（如有同分取第一个）
+    used_titles = set()
     for q in questions:
         qid = q["id"]
-        qname = q.get("name", "")
-        title_idx = None
-
-        for ti, table in enumerate(tables):
-            if ti in skip_indices:
-                continue
-            first_row = " ".join(str(c) for c in (table[0] if table else []))
-            # 匹配条件：包含题目名 OR 包含"第X题"模式
-            if _matches_question(first_row, qid, qname) and len(table) <= 2:
-                title_idx = ti
-                break
-
-        # 取标题表之后的内容表
-        if title_idx is not None:
+        best_ti, best_score = None, 0
+        for ti, cqid, score in candidates:
+            if ti in used_titles: continue
+            if cqid == qid and score > best_score:
+                best_ti, best_score = ti, score
+        if best_ti is not None:
+            used_titles.add(best_ti)
+            # 取标题表之后的内容表
             content_tables = []
-            for ti in range(title_idx + 1, len(tables)):
-                if ti in skip_indices:
-                    break  # 遇到下一个标题表/得分表就停
-                if len(tables[ti]) > 2:
-                    content_tables.append(tables[ti])
-                elif len(tables[ti]) <= 2:
-                    # 可能是下一题的标题表
-                    first_row = " ".join(str(c) for c in (tables[ti][0] if tables[ti] else []))
-                    if any(_matches_question(first_row, oq["id"], oq.get("name", ""))
-                           for oq in questions if oq["id"] != qid):
+            for ti2 in range(best_ti + 1, len(tables)):
+                if ti2 in skip_indices: break
+                if ti2 in used_titles: break
+                first_row = " ".join(str(c) for c in (tables[ti2][0] if tables[ti2] else []))
+                # 检查是否是另一道题的表头
+                other_match = False
+                for q2 in questions:
+                    if q2["id"] != qid and _match_score(first_row, q2["id"], q2.get("name", "")) > 0:
+                        other_match = True
                         break
+                if other_match and len(tables[ti2]) <= 2:
+                    break
+                if len(tables[ti2]) > 2:
+                    content_tables.append(tables[ti2])
             if content_tables:
                 mapping[qid] = content_tables
+
+    # 兜底：未匹配的题按文档顺序分配剩余表头
+    unmatched_qs = [q for q in questions if q["id"] not in mapping]
+    unused_headers = [
+        (ti, table) for ti, table in enumerate(tables)
+        if ti not in skip_indices and len(table) <= 2 and ti not in used_titles
+    ]
+    unused_headers.sort(key=lambda x: x[0])
+    for i, q in enumerate(unmatched_qs):
+        if i < len(unused_headers):
+            ti, _ = unused_headers[i]
+            used_titles.add(ti)
+            content_tables = []
+            for ti2 in range(ti + 1, len(tables)):
+                if ti2 in skip_indices: break
+                if ti2 in used_titles: break
+                if len(tables[ti2]) > 2:
+                    content_tables.append(tables[ti2])
+                elif len(tables[ti2]) <= 2:
+                    break
+            if content_tables:
+                mapping[q["id"]] = content_tables
 
     return mapping
 
@@ -328,22 +379,20 @@ def _extract_question(content_tables: list, question: dict,
     # 截图检测
     result["has_screenshot"] = len(images) >= 2 or _has_label(all_rows, ["截图", "screen"])
 
-    # 视频检测 —— 取最大的文件
+    # 视频检测 —— 取第一个（文件夹文件已优先于docx内嵌）
     if video_files:
         result["has_video"] = True
-        best = max(video_files, key=lambda p: os.path.getsize(p) if os.path.exists(p) else 0)
-        result["video_path"] = best
+        result["video_path"] = video_files[0]
     # 从段落文字兜底
     for i, text in paragraphs:
         if any(ext in text.lower() for ext in ['.mp4', '.avi', '.mov']):
             result["has_video"] = True
             break
 
-    # Excel 检测 —— 取最大的文件（处理后的通常更大）
+    # Excel 检测 —— 取第一个（文件夹文件已优先于docx内嵌）
     if excel_files:
         result["has_excel_file"] = True
-        best = max(excel_files, key=lambda p: os.path.getsize(p) if os.path.exists(p) else 0)
-        result["excel_path"] = best
+        result["excel_path"] = excel_files[0]
 
     # 链接检测
     for i, text in paragraphs:
@@ -365,8 +414,12 @@ def _extract_question(content_tables: list, question: dict,
 
     # ---- 图片分配（给 vision 类题目） ----
     if gtype == "vision":
-        # 方形大图作为生成图
-        square_imgs = [(p, w, h) for p, w, h in images if (w == h and w >= 500) or (0.7 < w/h < 1.3 and w >= 1000)]
+        # 方形大图作为生成图（跳过宽高为0的无效图片）
+        square_imgs = [(p, w, h) for p, w, h in images
+                       if w > 0 and h > 0 and (
+                           (w == h and w >= 500) or
+                           (0.7 < w/h < 1.3 and w >= 1000)
+                       )]
         gen_imgs = [p for p, w, h in square_imgs[:3]]
         if gen_imgs:
             result["generated_images"] = gen_imgs
