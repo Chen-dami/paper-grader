@@ -361,9 +361,9 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
     try:
         wb.save(filepath)
     except PermissionError:
-        ts = datetime.now().strftime("%H%M%S")
-        filepath = os.path.join(output_dir, f"评分汇总_{class_name}_{ts}.xlsx")
-        wb.save(filepath)
+        raise PermissionError(
+            f"无法保存 {filepath}，文件可能已在 Excel 中打开。请关闭后重试。"
+        )
     return filepath
 
 

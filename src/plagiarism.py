@@ -385,10 +385,9 @@ def _generate_report(pairs: list, meta_list: list, output_path: str):
     try:
         wb.save(output_path)
     except PermissionError:
-        from datetime import datetime
-        base, ext = os.path.splitext(output_path)
-        output_path = f"{base}_{datetime.now().strftime('%H%M%S')}{ext}"
-        wb.save(output_path)
+        raise PermissionError(
+            f"无法保存 {output_path}，文件可能已在 Excel 中打开。请关闭后重试。"
+        )
     print(f"  查重报告: {output_path}")
 
 
