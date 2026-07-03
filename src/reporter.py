@@ -347,7 +347,7 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
             ws2.cell(row=7 + bi, column=c).border = THIN_BORDER
 
     # 列宽
-    for col in range(1, col_count + 1):
+    for col in range(1, total_cols + 1):
         ws.column_dimensions[get_column_letter(col)].width = 13
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 18
