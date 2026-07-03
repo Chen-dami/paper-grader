@@ -273,9 +273,13 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
             qid = q["id"]
             qk = f"q{qid}"
             if qk not in clean: continue
-            r = grade(clean[qk], q, config)
-            all_scores[qid] = r
-            total_score += r.get("总分", 0)
+            try:
+                r = grade(clean[qk], q, config)
+                all_scores[qid] = r
+                total_score += r.get("总分", 0)
+            except Exception as e:
+                all_scores[qid] = {"总分": 0, "评语": f"评分异常: {e}", "切题判断": "错误"}
+                stat.text(f"Q{qid}评分异常 ({i+1}/{total}): {fn} -- {e}")
 
         individual_report(student, all_scores, rubric, out_dir)
 

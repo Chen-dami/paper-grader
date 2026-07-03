@@ -127,18 +127,31 @@ def _match_tables_to_questions(tables: list, rubric: dict) -> dict:
 
 
 def _matches_question(text: str, qid: int, qname: str) -> bool:
-    """检查文本是否匹配某道题"""
+    """检查文本是否匹配某道题（支持模糊匹配）"""
+    if not text.strip():
+        return False
+
+    # 1. 精确子串匹配
     if qname and qname in text:
         return True
-    # 匹配 "一" "二" "三" 等中文数字
+
+    # 2. 部分匹配：题目名的字 50% 以上出现在 text 中
+    if qname and len(qname) >= 2:
+        hits = sum(1 for ch in qname if ch in text)
+        if hits / len(qname) >= 0.5:
+            return True
+
+    # 3. 中文数字序号匹配
     cn_nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
     if qid < len(cn_nums):
         patterns = [
-            f"第{qid}题", f"题{cn_nums[qid]}", f"、{cn_nums[qid]}、",
+            f"第{qid}题", f"题{cn_nums[qid]}",
             f"{cn_nums[qid]}、", f"({cn_nums[qid]})",
+            f"（{cn_nums[qid]}）",
         ]
         if any(p in text for p in patterns):
             return True
+
     return False
 
 

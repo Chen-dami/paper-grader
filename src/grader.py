@@ -11,20 +11,23 @@ def grade(q_data: dict, question: dict, config: dict) -> dict:
     criteria = question["criteria"]
     max_score = question["max_score"]
 
-    if _is_empty(q_data, gtype):
-        return _zero_score(criteria, max_score, "内容为空")
+    try:
+        if _is_empty(q_data, gtype):
+            return _zero_score(criteria, max_score, "内容为空")
 
-    tier = _detect_tier(q_data, question)
+        tier = _detect_tier(q_data, question)
 
-    if gtype == "code":
-        result = _grade_code(q_data, question, tier, config)
-    elif gtype == "vision":
-        result = _grade_llm(q_data, question, tier, config, use_vision=True)
-    else:
-        result = _grade_llm(q_data, question, tier, config, use_vision=False)
+        if gtype == "code":
+            result = _grade_code(q_data, question, tier, config)
+        elif gtype == "vision":
+            result = _grade_llm(q_data, question, tier, config, use_vision=True)
+        else:
+            result = _grade_llm(q_data, question, tier, config, use_vision=False)
 
-    total = sum(result.get(f"得分_{c['id']}_{c['name']}", 0) for c in criteria)
-    result["总分"] = min(total, max_score)
+        total = sum(result.get(f"得分_{c['id']}_{c['name']}", 0) for c in criteria)
+        result["总分"] = min(total, max_score)
+    except Exception as e:
+        result = _zero_score(criteria, max_score, f"评分异常: {e}")
     return result
 
 
@@ -158,7 +161,7 @@ def _grade_code(q_data: dict, question: dict, tier: str, config: dict) -> dict:
     scores = {}
     reasons = {}
 
-    if excel_path and os.path.exists(excel_path):
+    if excel_path and isinstance(excel_path, str) and os.path.exists(excel_path):
         try:
             df = pd.read_excel(excel_path)
             scores, reasons = _run_data_checks(df, criteria, data_checks, mode)
