@@ -352,14 +352,16 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                 plag_files = []
                 for cname in class_list:
                     pdc = os.path.join("data", "papers", cname)
-                    if os.path.isdir(pdc):
-                        rpt_path = os.path.join(out_dir, f"查重报告_{cname}.xlsx")
-                        pairs = run_plag(pdc, [], rpt_path)
-                        if pairs:
-                            plag_files.append(rpt_path)
+                    if not os.path.isdir(pdc):
+                        continue
+                    cls_out = os.path.join("output", cname)
+                    os.makedirs(cls_out, exist_ok=True)
+                    rpt_path = os.path.join(cls_out, "查重报告.xlsx")
+                    pairs = run_plag(pdc, [], rpt_path)
+                    if pairs:
+                        plag_files.append(rpt_path)
                 if plag_files:
                     st.session_state._plag_files = plag_files
-                    total_pairs = sum(1 for _ in plag_files)
                     st.success(f"查重完成，{len(plag_files)} 个班级有可疑结果")
 
     st.session_state.grading_results = results
