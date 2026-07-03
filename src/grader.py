@@ -154,19 +154,18 @@ def _get_tier_config():
 
 
 def _is_truly_empty(q_data: dict, gtype: str) -> bool:
-    """仅当完全无文字+无任何媒体时才判空。宁可多走LLM也不错杀。"""
+    """仅当完全无文字+无任何媒体时才判空。"""
     if gtype == "code":
         return not (q_data.get("excel_path") or q_data.get("has_excel_file") or q_data.get("has_screenshot"))
-    all_text = _collect_text(q_data, gtype)
+    student_text = "".join(str(q_data.get(k, "")) for k in
+        ["prompt_text", "result_text", "image_prompt", "video_prompt", "persona_text"])
     has_media = (
-        q_data.get("has_screenshot") or
-        q_data.get("has_video") or
         q_data.get("generated_images") or
         q_data.get("reference_image") or
-        q_data.get("has_excel_file") or
+        (q_data.get("has_video") and q_data.get("video_path")) or
         bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
     )
-    return len(all_text.strip()) < 5 and not has_media
+    return len(student_text.strip()) < 5 and not has_media
 
 
 def _zero_score(criteria: list, max_score: int, msg: str) -> dict:

@@ -393,21 +393,25 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         if check_plag and len(paper_files) >= 2:
             with st.spinner("查重中..."):
                 from src.plagiarism import check_all as run_plag
-                class_list = st.session_state.get("_class_names_list", [class_name])
-                plag_files = []
-                for cname in class_list:
-                    pdc = os.path.join("data", "papers", cname)
-                    if not os.path.isdir(pdc):
-                        continue
-                    cls_out = os.path.join("output", cname)
-                    os.makedirs(cls_out, exist_ok=True)
-                    rpt_path = os.path.join(cls_out, "查重报告.xlsx")
-                    pairs = run_plag(pdc, [], rpt_path)
+                plag_rpt = os.path.join(out_dir, "查重报告.xlsx")
+                # 收集所有涉及的实际班级目录
+                scan_dirs = []
+                for _, display, _ in paper_files:
+                    cn = display.split("/")[0]
+                    pd = os.path.join("data", "papers", cn)
+                    if os.path.isdir(pd) and pd not in scan_dirs:
+                        scan_dirs.append(pd)
+                if not scan_dirs:
+                    scan_dirs = [os.path.join("data", "papers", class_name)]
+                all_pairs = []
+                for pd in scan_dirs:
+                    pairs = run_plag(pd, [], plag_rpt if len(scan_dirs) == 1
+                        else os.path.join(out_dir, f"查重报告_{os.path.basename(pd)}.xlsx"))
                     if pairs:
-                        plag_files.append(rpt_path)
-                if plag_files:
-                    st.session_state._plag_files = plag_files
-                    st.success(f"查重完成，{len(plag_files)} 个班级有可疑结果")
+                        all_pairs.extend(pairs)
+                if all_pairs:
+                    st.session_state._plag_pairs = len(all_pairs)
+                    st.success(f"查重完成，{len(all_pairs)} 对可疑")
 
     st.session_state.grading_results = results
     st.session_state.current_class = class_name
@@ -444,22 +448,17 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                 with open(sp, "rb") as f:
                     st.download_button("班级得分表", f.read(), file_name=f"评分汇总_{safe_class}.xlsx")
         with dl2:
-            plag_files = st.session_state.get("_plag_files", [])
-            if not plag_files:
-                plag_files = glob.glob(os.path.join(out_dir, "查重报告*.xlsx"))
-                # 也搜索各班目录
-                for cname in st.session_state.get("_class_names_list", []):
-                    plag_files.extend(glob.glob(os.path.join("output", cname, "查重报告.xlsx")))
-            if plag_files:
-                if len(plag_files) == 1:
-                    with open(plag_files[0], "rb") as f:
-                        st.download_button("查重报告", f.read(), file_name=os.path.basename(plag_files[0]))
-                else:
+            plag_rpt = os.path.join(out_dir, "查重报告.xlsx")
+            if os.path.exists(plag_rpt):
+                with open(plag_rpt, "rb") as f:
+                    st.download_button("查重报告", f.read(), file_name="查重报告.xlsx")
+            else:
+                plag_files = glob.glob(os.path.join(out_dir, "查重报告_*.xlsx"))
+                if plag_files:
                     zb2 = io.BytesIO()
                     with zipfile.ZipFile(zb2, "w", zipfile.ZIP_DEFLATED) as zf:
                         for pf in plag_files:
-                            if os.path.exists(pf):
-                                zf.write(pf, os.path.basename(pf))
+                            zf.write(pf, os.path.basename(pf))
                     st.download_button("查重报告(ZIP)", zb2.getvalue(), file_name=f"查重报告_{safe_class}.zip")
-            else:
-                st.caption("查重报告：未生成（需≥2份试卷）")
+                else:
+                    st.caption("查重报告：未生成（需≥2份试卷且勾选查重）")
