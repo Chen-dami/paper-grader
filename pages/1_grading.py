@@ -11,7 +11,7 @@ from src import llm, db
 from src.extractor import extract, extract_from_student_folder
 from src.preprocessor import process
 from src.grader import grade, extract_scores
-from src.reporter import individual_report, class_summary_report
+from src.reporter import class_summary_report
 
 from src.ui_style import inject; inject()
 
@@ -274,6 +274,10 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     llm.init_llm(config.get("llm", {}))
     db.init_db(config.get("database", {}))
 
+    if "questions" not in rubric:
+        st.error("评分标准解析异常，缺少题目信息。请重新上传评分标准文档。")
+        st.stop()
+
     out_dir = os.path.join("output", class_name.replace(" + ", "_"))
     safe_class = class_name.replace(" + ", "_")
     results = []
@@ -311,8 +315,6 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
             except Exception as e:
                 all_scores[qid] = {"总分": 0, "评语": f"评分异常: {e}", "切题判断": "错误"}
                 stat.text(f"Q{qid}评分异常 ({i+1}/{total}): {fn} -- {e}")
-
-        individual_report(student, all_scores, rubric, out_dir)
 
         pt = paper.get("paper_dir", "")
         if pt and os.path.isdir(pt):
@@ -435,22 +437,13 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         m4.metric("及格率", f"{(df['总分'] >= 60).sum() / len(df) * 100:.0f}%")
 
         st.divider()
-        dl1, dl2, dl3 = st.columns(3)
+        dl1, dl2 = st.columns(2)
         with dl1:
             sp = os.path.join(out_dir, f"评分汇总_{safe_class}.xlsx")
             if os.path.exists(sp):
                 with open(sp, "rb") as f:
-                    st.download_button("班级汇总", f.read(), file_name=f"评分汇总_{safe_class}.xlsx")
+                    st.download_button("班级得分表", f.read(), file_name=f"评分汇总_{safe_class}.xlsx")
         with dl2:
-            pdir = os.path.join(out_dir, "个人成绩")
-            if os.path.exists(pdir):
-                zb = io.BytesIO()
-                with zipfile.ZipFile(zb, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for f in os.listdir(pdir):
-                        if f.endswith(".xlsx"):
-                            zf.write(os.path.join(pdir, f), f)
-                st.download_button("个人明细(ZIP)", zb.getvalue(), file_name=f"个人明细_{safe_class}.zip")
-        with dl3:
             plag_files = st.session_state.get("_plag_files", [])
             if not plag_files:
                 plag_files = glob.glob(os.path.join(out_dir, "查重报告*.xlsx"))

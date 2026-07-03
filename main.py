@@ -16,7 +16,7 @@ from src import db, llm
 from src.extractor import extract
 from src.preprocessor import process
 from src.grader import grade, extract_scores
-from src.reporter import individual_report, class_summary_report, print_stats
+from src.reporter import class_summary_report, print_stats
 
 
 def load_config(path: str = "config.yaml") -> dict:
@@ -75,9 +75,6 @@ def grade_one(paper_path: str, rubric: dict, config: dict, out_dir: str) -> dict
     comments = " | ".join(str(all_scores.get(q["id"], {}).get("评语", ""))
                           for q in rubric["questions"])
     db.update_paper(pid, total, "done", comments[:200])
-
-    # 个人明细
-    individual_report(student, all_scores, rubric, out_dir)
 
     # 清理临时文件
     import shutil

@@ -157,36 +157,38 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
     questions = rubric["questions"]
     wb = Workbook()
 
-    # ===== Sheet 1: 成绩表（得分项列式） =====
+    # ===== Sheet 1: 得分表 =====
     ws = wb.active
-    ws.title = f"{class_name}"
+    ws.title = "得分表"
 
-    # 构建列映射: [(题号, 题目名, 题满分, [(得分项id, 得分项名, 满分), ...]), ...]
+    # 构建列映射
     col_map = []  # [(qid, qname, qmax, [(cid, cname, cmax), ...]), ...]
     for q in questions:
         items = [(c["id"], c["name"], c["max"]) for c in q["criteria"]]
         col_map.append((q["id"], q["name"], q["max_score"], items))
 
-    # 计算总列数
     fixed_cols = 3  # 序号, 学号, 姓名
     criterion_cols = sum(len(items) for _, _, _, items in col_map)
-    total_cols = fixed_cols + criterion_cols + 2  # +总分 +平均分
+    total_cols = fixed_cols + criterion_cols + 1  # +总分
 
     total_max = rubric["exam"]["total_score"]
 
     # ---- 行1: 标题 ----
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
-    ws['A1'] = f"《{rubric['exam']['name']}》{class_name} 成绩表"
+    ws['A1'] = f"《{rubric['exam']['name']}》{class_name} 得分表"
     ws['A1'].font = TITLE_FONT; ws['A1'].alignment = CENTER
 
-    # ---- 行2: 大题表头（合并） ----
-    ws.merge_cells(start_row=2, start_column=1, end_row=3, end_column=1)
+    # ---- 行2-4: 表头 ----
+    # 行2: 大题名（合并）
+    # 行3: 得分项名
+    # 行4: 满分值
+    ws.merge_cells(start_row=2, start_column=1, end_row=4, end_column=1)
     ws.cell(row=2, column=1, value="序号").font = HEADER_FONT
     ws.cell(row=2, column=1).fill = HEADER_FILL; ws.cell(row=2, column=1).border = THIN_BORDER; ws.cell(row=2, column=1).alignment = CENTER
-    ws.merge_cells(start_row=2, start_column=2, end_row=3, end_column=2)
+    ws.merge_cells(start_row=2, start_column=2, end_row=4, end_column=2)
     ws.cell(row=2, column=2, value="学号").font = HEADER_FONT
     ws.cell(row=2, column=2).fill = HEADER_FILL; ws.cell(row=2, column=2).border = THIN_BORDER; ws.cell(row=2, column=2).alignment = CENTER
-    ws.merge_cells(start_row=2, start_column=3, end_row=3, end_column=3)
+    ws.merge_cells(start_row=2, start_column=3, end_row=4, end_column=3)
     ws.cell(row=2, column=3, value="姓名").font = HEADER_FONT
     ws.cell(row=2, column=3).fill = HEADER_FILL; ws.cell(row=2, column=3).border = THIN_BORDER; ws.cell(row=2, column=3).alignment = CENTER
 
@@ -198,23 +200,20 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
         c = ws.cell(row=2, column=cur_col, value=f"Q{qid} {qname}({qmax}分)")
         c.font = HEADER_FONT; c.fill = HEADER_FILL; c.border = THIN_BORDER; c.alignment = CENTER
         for j, (cid, cname, cmax) in enumerate(items):
-            cc = ws.cell(row=3, column=cur_col + j, value=f"{cname}\n({cmax}分)")
-            cc.font = Font(name="微软雅黑", size=8, bold=True, color="FFFFFF")
-            cc.fill = HEADER_FILL; cc.border = THIN_BORDER; cc.alignment = CENTER
+            ws.cell(row=3, column=cur_col + j, value=cname).font = HEADER_FONT
+            ws.cell(row=3, column=cur_col + j).fill = HEADER_FILL; ws.cell(row=3, column=cur_col + j).border = THIN_BORDER; ws.cell(row=3, column=cur_col + j).alignment = CENTER
+            ws.cell(row=4, column=cur_col + j, value=cmax).font = NORMAL_FONT
+            ws.cell(row=4, column=cur_col + j).border = THIN_BORDER; ws.cell(row=4, column=cur_col + j).alignment = CENTER
         cur_col += n
 
-    # 总分 + 平均分
-    ws.merge_cells(start_row=2, start_column=cur_col, end_row=3, end_column=cur_col)
+    # 总分
+    ws.merge_cells(start_row=2, start_column=cur_col, end_row=4, end_column=cur_col)
     ws.cell(row=2, column=cur_col, value="总分").font = HEADER_FONT
     ws.cell(row=2, column=cur_col).fill = HEADER_FILL; ws.cell(row=2, column=cur_col).border = THIN_BORDER; ws.cell(row=2, column=cur_col).alignment = CENTER
     total_score_col = cur_col
-    cur_col += 1
-    ws.merge_cells(start_row=2, start_column=cur_col, end_row=3, end_column=cur_col)
-    ws.cell(row=2, column=cur_col, value="平均分").font = HEADER_FONT
-    ws.cell(row=2, column=cur_col).fill = HEADER_FILL; ws.cell(row=2, column=cur_col).border = THIN_BORDER; ws.cell(row=2, column=cur_col).alignment = CENTER
 
     # ---- 学生数据 ----
-    row = 4
+    row = 5
     all_criterion_sums = {cid: 0.0 for _, _, _, items in col_map for cid, _, _ in items}
     all_criterion_counts = {cid: 0 for _, _, _, items in col_map for cid, _, _ in items}
     total_sum = 0.0
@@ -246,15 +245,9 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
                 cur_col += 1
 
         total = r.get("total_score", 0)
-        if total == 0 and student_total == 0:
-            total = student_total
         ws.cell(row=row, column=total_score_col, value=total).font = BOLD_FONT
         ws.cell(row=row, column=total_score_col).alignment = CENTER
         ws.cell(row=row, column=total_score_col).border = THIN_BORDER
-        avg_val = round(total / total_max * 100, 1) if total_max > 0 else 0
-        ws.cell(row=row, column=total_score_col + 1, value=f"{avg_val:.1f}").font = NORMAL_FONT
-        ws.cell(row=row, column=total_score_col + 1).alignment = CENTER
-        ws.cell(row=row, column=total_score_col + 1).border = THIN_BORDER
 
         if total < 60:
             for c in range(1, total_cols + 1):
@@ -284,10 +277,6 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
     ws.cell(row=row, column=total_score_col, value=total_avg).font = BOLD_FONT
     ws.cell(row=row, column=total_score_col).alignment = CENTER
     ws.cell(row=row, column=total_score_col).border = THIN_BORDER
-    pct_avg = round(total_avg / total_max * 100, 1) if total_max > 0 else 0
-    ws.cell(row=row, column=total_score_col + 1, value=f"{pct_avg:.1f}").font = BOLD_FONT
-    ws.cell(row=row, column=total_score_col + 1).alignment = CENTER
-    ws.cell(row=row, column=total_score_col + 1).border = THIN_BORDER
 
     # 列宽
     ws.column_dimensions['A'].width = 6
@@ -356,56 +345,6 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
         ws2.cell(row=7 + bi, column=2).alignment = CENTER
         for c in range(1, 3):
             ws2.cell(row=7 + bi, column=c).border = THIN_BORDER
-
-    # ===== Sheet 3: 得分明细 =====
-    has_detail = any(r.get("_criteria") for r in results)
-    if has_detail:
-        ws3 = wb.create_sheet("得分明细")
-        detail_headers = ["序号", "学号", "姓名", "题号", "题目", "得分项", "得分", "满分", "得分率"]
-        for col, h in enumerate(detail_headers, 1):
-            c = ws3.cell(row=1, column=col, value=h)
-            c.font = HEADER_FONT; c.fill = HEADER_FILL; c.border = THIN_BORDER; c.alignment = CENTER
-
-        drow = 2
-        for i, r in enumerate(results):
-            sid = r.get("student_id", "")
-            sname = r.get("student_name", "")
-            criteria = r.get("_criteria", {})
-            if not criteria:
-                continue
-            for q in questions:
-                qid = str(q["id"])
-                q_criteria = criteria.get(qid, {})
-                for cid, cd in q_criteria.items():
-                    ws3.cell(row=drow, column=1, value=i + 1).font = NORMAL_FONT
-                    ws3.cell(row=drow, column=2, value=sid).font = NORMAL_FONT
-                    ws3.cell(row=drow, column=3, value=sname).font = NORMAL_FONT
-                    ws3.cell(row=drow, column=4, value=f"Q{qid}").font = NORMAL_FONT
-                    ws3.cell(row=drow, column=5, value=q["name"]).font = NORMAL_FONT
-                    ws3.cell(row=drow, column=6, value=cd.get("name", "")).font = NORMAL_FONT
-                    score = cd.get("score", 0)
-                    max_s = cd.get("max", 1)
-                    ws3.cell(row=drow, column=7, value=score).font = NORMAL_FONT
-                    ws3.cell(row=drow, column=8, value=max_s).font = NORMAL_FONT
-                    rate = score / max_s if max_s > 0 else 0
-                    ws3.cell(row=drow, column=9, value=f"{rate:.0%}").font = NORMAL_FONT
-                    sc = ws3.cell(row=drow, column=7)
-                    if max_s > 0:
-                        if rate >= 0.8:
-                            sc.fill = PASS_FILL
-                        elif rate < 0.5:
-                            sc.fill = FAIL_FILL
-                    for col in range(1, 10):
-                        ws3.cell(row=drow, column=col).border = THIN_BORDER
-                    ws3.cell(row=drow, column=1).alignment = CENTER
-                    ws3.cell(row=drow, column=4).alignment = CENTER
-                    ws3.cell(row=drow, column=7).alignment = CENTER
-                    ws3.cell(row=drow, column=8).alignment = CENTER
-                    ws3.cell(row=drow, column=9).alignment = CENTER
-                    drow += 1
-
-        for col, w in enumerate([6, 18, 12, 6, 16, 22, 8, 8, 8], 1):
-            ws3.column_dimensions[get_column_letter(col)].width = w
 
     # 列宽
     for col in range(1, col_count + 1):
