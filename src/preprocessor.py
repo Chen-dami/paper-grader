@@ -315,20 +315,22 @@ def _extract_question(content_tables: list, question: dict,
     # 截图检测
     result["has_screenshot"] = len(images) >= 2 or _has_label(all_rows, ["截图", "screen"])
 
-    # 视频检测
+    # 视频检测 —— 取最大的文件
     if video_files:
         result["has_video"] = True
-        result["video_path"] = video_files[0]
+        best = max(video_files, key=lambda p: os.path.getsize(p) if os.path.exists(p) else 0)
+        result["video_path"] = best
     # 从段落文字兜底
     for i, text in paragraphs:
         if any(ext in text.lower() for ext in ['.mp4', '.avi', '.mov']):
             result["has_video"] = True
             break
 
-    # Excel 检测
+    # Excel 检测 —— 取最大的文件（处理后的通常更大）
     if excel_files:
         result["has_excel_file"] = True
-        result["excel_path"] = excel_files[0]
+        best = max(excel_files, key=lambda p: os.path.getsize(p) if os.path.exists(p) else 0)
+        result["excel_path"] = best
 
     # 链接检测
     for i, text in paragraphs:

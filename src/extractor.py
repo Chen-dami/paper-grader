@@ -239,7 +239,7 @@ def extract_from_student_folder(docx_path: str, output_dir: str = "output",
         os.makedirs(img_dir, exist_ok=True)
         os.makedirs(embed_dir, exist_ok=True)
 
-        # 注入文件夹中的独立图片
+        # 文件夹素材插入到列表开头，优先于 docx 内嵌文件
         for img_path in supplementary_files.get("images", []):
             if not os.path.exists(img_path):
                 continue
@@ -249,9 +249,8 @@ def extract_from_student_folder(docx_path: str, output_dir: str = "output",
                 shutil.copy2(img_path, dest)
             size = os.path.getsize(dest)
             w, h = _get_image_size(open(dest, "rb").read(), fname)
-            paper["images"].append((dest, w, h, size))
+            paper["images"].insert(0, (dest, w, h, size))
 
-        # 注入文件夹中的独立 Excel
         for xlsx_path in supplementary_files.get("excel", []):
             if not os.path.exists(xlsx_path):
                 continue
@@ -259,7 +258,7 @@ def extract_from_student_folder(docx_path: str, output_dir: str = "output",
             dest = os.path.join(embed_dir, fname)
             if not os.path.exists(dest):
                 shutil.copy2(xlsx_path, dest)
-            paper["embedded_files"].append((dest, os.path.splitext(fname)[1]))
+            paper["embedded_files"].insert(0, (dest, os.path.splitext(fname)[1]))
 
     return paper
 

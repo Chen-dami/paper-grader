@@ -7,7 +7,7 @@ llm:
   max_tokens: 2048
   temperature: 0.3
 grading:
-  mode: relaxed
+  mode: 适当严格
   pass_line: 60
   tiers:
     贴合主题:
@@ -35,7 +35,42 @@ grading:
       ratio_min: 0.0
       ratio_max: 0.0
   code_base_ratio: 0.6
-custom_presets: {}
+custom_presets:
+  适当严格:
+    desc: 适当严格
+    tiers:
+      贴合主题:
+        ratio_min: 0.95
+        ratio_max: 1.0
+        desc: ''
+      跑题:
+        ratio_min: 0.5
+        ratio_max: 0.7
+        desc: ''
+      有视频:
+        ratio_min: 0.9
+        ratio_max: 1.0
+        desc: ''
+      无视频:
+        ratio_min: 0.3
+        ratio_max: 0.45
+        desc: ''
+      有截图:
+        ratio_min: 0.8
+        ratio_max: 1.0
+        desc: ''
+      无截图:
+        ratio_min: 0.3
+        ratio_max: 0.45
+        desc: ''
+      敷衍:
+        ratio_min: 0.3
+        ratio_max: 0.5
+        desc: ''
+      空:
+        ratio_min: 0.0
+        ratio_max: 0.0
+        desc: ''
 image:
   max_width: 768
   quality: 75

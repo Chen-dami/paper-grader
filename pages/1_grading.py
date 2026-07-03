@@ -246,6 +246,7 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     out_dir = os.path.join("output", class_name.replace(" + ", "_"))
     safe_class = class_name.replace(" + ", "_")
     results = []
+    failed = []
     bar = st.progress(0)
     stat = st.empty()
     total = len(paper_files)
@@ -257,7 +258,12 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
             clean = process(paper, rubric, config)
             student = paper["student_info"]
         except Exception as e:
-            stat.text(f"提取失败 ({i+1}/{total}): {fn} -- {e}")
+            failed.append(f"{fn}: {e}")
+            # 清理失败的临时目录
+            bn = os.path.splitext(os.path.basename(pp))[0]
+            td = os.path.join(out_dir, bn)
+            if os.path.isdir(td):
+                shutil.rmtree(td, ignore_errors=True)
             bar.progress((i + 1) / total)
             continue
 
@@ -286,7 +292,22 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         })
         bar.progress((i + 1) / total)
 
-    stat.text(f"阅卷完成！共 {len(results)} 份")
+    # 批量清理残留临时目录
+    for d in os.listdir(out_dir) if os.path.isdir(out_dir) else []:
+        dp = os.path.join(out_dir, d)
+        if os.path.isdir(dp) and d not in ("个人成绩",):
+            imgs = os.path.join(dp, "images")
+            embs = os.path.join(dp, "embeddings")
+            if os.path.isdir(imgs) or os.path.isdir(embs):
+                shutil.rmtree(dp, ignore_errors=True)
+
+    if failed:
+        stat.text(f"阅卷完成！成功 {len(results)}/{total} 份，失败 {len(failed)} 份")
+        with st.expander(f"⚠ {len(failed)} 份提取失败详情"):
+            for f in failed:
+                st.caption(f)
+    else:
+        stat.text(f"阅卷完成！共 {len(results)} 份")
 
     if results:
         summary_data = []
