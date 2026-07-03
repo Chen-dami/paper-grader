@@ -261,6 +261,8 @@ can_run = bool(paper_files)
 
 if st.button("开始阅卷", type="primary", disabled=not can_run, use_container_width=True) and paper_files:
     from src.utils import build_runtime_config, load_rubric as lr
+    from src.plagiarism import PLAG_LEVELS
+    from collections import defaultdict
     config = build_runtime_config()
     rubric = lr(rubric_path)
     st.session_state.rubric = rubric
@@ -278,148 +280,211 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         st.error("评分标准解析异常，缺少题目信息。请重新上传评分标准文档。")
         st.stop()
 
-    out_dir = os.path.join("output", class_name.replace(" + ", "_"))
-    safe_class = class_name.replace(" + ", "_")
-    results = []
-    failed = []
-    bar = st.progress(0)
-    stat = st.empty()
-    total = len(paper_files)
+    # ---- 按班级分组 ----
+    by_class = defaultdict(list)
+    for item in paper_files:
+        pp, fn, supp = item
+        cn = fn.split("/")[0]  # 从 display 路径提取班级名
+        by_class[cn].append(item)
 
-    for i, (pp, fn, supp) in enumerate(paper_files):
-        stat.text(f"评阅中 ({i+1}/{total}): {fn}")
-        try:
-            paper = extract_from_student_folder(pp, out_dir, supp)
-            clean = process(paper, rubric, config)
-            student = paper["student_info"]
-        except Exception as e:
-            failed.append(f"{fn}: {e}")
-            # 清理失败的临时目录
-            bn = os.path.splitext(os.path.basename(pp))[0]
-            td = os.path.join(out_dir, bn)
-            if os.path.isdir(td):
-                shutil.rmtree(td, ignore_errors=True)
-            bar.progress((i + 1) / total)
-            continue
+    all_class_results = {}   # {cn: [results]}
+    all_class_failed = {}    # {cn: [failed]}
+    plag_summary = {}        # {cn: {"pairs": int, "auto_zero": int}}
+    global_total = len(paper_files)
+    global_done = 0
 
-        total_score = 0
-        all_scores = {}
-        for q in rubric["questions"]:
-            qid = q["id"]
-            qk = f"q{qid}"
-            if qk not in clean: continue
+    # ---- 逐班阅卷 ----
+    for cn, class_papers in by_class.items():
+        out_dir = os.path.join("output", cn)
+        safe_class = cn
+        results = []
+        failed = []
+
+        st.divider()
+        st.subheader(f"📊 班级：{cn}（{len(class_papers)} 份）")
+
+        bar = st.progress(0)
+        stat = st.empty()
+
+        for i, (pp, fn, supp) in enumerate(class_papers):
+            stat.text(f"评阅中 ({i+1}/{len(class_papers)}): {fn}")
             try:
-                r = grade(clean[qk], q, config)
-                all_scores[qid] = r
-                total_score += r.get("总分", 0)
+                paper = extract_from_student_folder(pp, out_dir, supp)
+                clean = process(paper, rubric, config)
+                student = paper["student_info"]
             except Exception as e:
-                all_scores[qid] = {"总分": 0, "评语": f"评分异常: {e}", "切题判断": "错误"}
-                stat.text(f"Q{qid}评分异常 ({i+1}/{total}): {fn} -- {e}")
+                failed.append(f"{fn}: {e}")
+                bn = os.path.splitext(os.path.basename(pp))[0]
+                td = os.path.join(out_dir, bn)
+                if os.path.isdir(td):
+                    shutil.rmtree(td, ignore_errors=True)
+                bar.progress((i + 1) / len(class_papers))
+                global_done += 1
+                continue
 
-        pt = paper.get("paper_dir", "")
-        if pt and os.path.isdir(pt):
-            shutil.rmtree(pt, ignore_errors=True)
-
-        q_scores = {}
-        for q in rubric["questions"]:
-            q_scores[f"q{q['id']}_score"] = all_scores.get(q["id"], {}).get("总分", 0)
-        criteria = {}
-        for q in rubric["questions"]:
-            qid = q["id"]
-            qs = all_scores.get(qid, {})
-            c_scores = {}
-            for c in q["criteria"]:
-                key = f"得分_{c['id']}_{c['name']}"
-                c_scores[c["id"]] = {"name": c["name"], "score": qs.get(key, 0), "max": c["max"]}
-            criteria[str(qid)] = c_scores
-        results.append({
-            "student_id": student.get("学号", "?"),
-            "student_name": student.get("姓名", "?"),
-            "student_id_alias": student.get("学号", "?"),
-            **q_scores,
-            **{q["name"]: all_scores.get(q["id"], {}).get("总分", 0) for q in rubric["questions"]},
-            "total_score": total_score,
-            "总分": total_score,
-            "文件名": fn,
-            "_criteria": criteria,
-            "class_name": class_name,
-        })
-        bar.progress((i + 1) / total)
-
-    # 批量清理残留临时目录
-    for d in os.listdir(out_dir) if os.path.isdir(out_dir) else []:
-        dp = os.path.join(out_dir, d)
-        if os.path.isdir(dp) and d not in ("个人成绩",):
-            imgs = os.path.join(dp, "images")
-            embs = os.path.join(dp, "embeddings")
-            if os.path.isdir(imgs) or os.path.isdir(embs):
-                shutil.rmtree(dp, ignore_errors=True)
-
-    # 核查提醒：有内容但某评分项为0的标记
-    review_items = []
-    for r in results:
-        criteria = r.get("_criteria", {})
-        for qid_str, crits in criteria.items():
-            for cid, cd in crits.items():
-                if cd.get("score", 0) == 0 and cd.get("max", 0) > 0:
-                    review_items.append(f"{r.get('student_name','?')} Q{qid_str} {cd['name']}: 0/{cd['max']}分")
-    if review_items:
-        with st.expander(f"🔍 核查提醒：{len(review_items)} 个评分项为0分（可能有遗漏，请人工复核）", expanded=len(review_items) <= 10):
-            for item in review_items[:50]:
-                st.caption(item)
-            if len(review_items) > 50:
-                st.caption(f"... 还有 {len(review_items) - 50} 项")
-
-    if failed:
-        stat.text(f"阅卷完成！成功 {len(results)}/{total} 份，失败 {len(failed)} 份")
-        with st.expander(f"⚠ {len(failed)} 份提取失败详情"):
-            for f in failed:
-                st.caption(f)
-    else:
-        stat.text(f"阅卷完成！共 {len(results)} 份")
-
-    if results:
-        summary_data = []
-        for r in results:
-            item = {"student_id": r.get("student_id", r.get("学号", "")),
-                    "student_name": r.get("student_name", r.get("姓名", "")),
-                    "class_name": class_name, "total_score": r.get("total_score", r.get("总分", 0)),
-                    "_criteria": r.get("_criteria", {})}
+            total_score = 0
+            all_scores = {}
             for q in rubric["questions"]:
-                item[f"q{q['id']}_score"] = r.get(q["name"], r.get(f"q{q['id']}_score", 0))
-            summary_data.append(item)
-        class_summary_report(summary_data, rubric, out_dir, safe_class)
+                qid = q["id"]
+                qk = f"q{qid}"
+                if qk not in clean: continue
+                try:
+                    r = grade(clean[qk], q, config)
+                    all_scores[qid] = r
+                    total_score += r.get("总分", 0)
+                except Exception as e:
+                    all_scores[qid] = {"总分": 0, "评语": f"评分异常: {e}", "切题判断": "错误"}
+                    stat.text(f"Q{qid}评分异常 ({i+1}/{len(class_papers)}): {fn} -- {e}")
 
-        if check_plag and len(paper_files) >= 2:
-            with st.spinner("查重中..."):
+            pt = paper.get("paper_dir", "")
+            if pt and os.path.isdir(pt):
+                shutil.rmtree(pt, ignore_errors=True)
+
+            q_scores = {}
+            for q in rubric["questions"]:
+                q_scores[f"q{q['id']}_score"] = all_scores.get(q["id"], {}).get("总分", 0)
+            criteria = {}
+            for q in rubric["questions"]:
+                qid = q["id"]
+                qs = all_scores.get(qid, {})
+                c_scores = {}
+                for c in q["criteria"]:
+                    key = f"得分_{c['id']}_{c['name']}"
+                    c_scores[c["id"]] = {"name": c["name"], "score": qs.get(key, 0), "max": c["max"]}
+                criteria[str(qid)] = c_scores
+            results.append({
+                "student_id": student.get("学号", "?"),
+                "student_name": student.get("姓名", "?"),
+                "student_id_alias": student.get("学号", "?"),
+                **q_scores,
+                **{q["name"]: all_scores.get(q["id"], {}).get("总分", 0) for q in rubric["questions"]},
+                "total_score": total_score,
+                "总分": total_score,
+                "文件名": fn,
+                "_criteria": criteria,
+                "class_name": cn,
+                "_source_file": os.path.basename(pp),  # 用于查重匹配
+            })
+            bar.progress((i + 1) / len(class_papers))
+            global_done += 1
+
+        # 批量清理残留
+        for d in os.listdir(out_dir) if os.path.isdir(out_dir) else []:
+            dp = os.path.join(out_dir, d)
+            if os.path.isdir(dp) and d not in ("个人成绩",):
+                imgs = os.path.join(dp, "images")
+                embs = os.path.join(dp, "embeddings")
+                if os.path.isdir(imgs) or os.path.isdir(embs):
+                    shutil.rmtree(dp, ignore_errors=True)
+
+        # ---- 核查提醒 ----
+        review_items = []
+        for r in results:
+            criteria = r.get("_criteria", {})
+            for qid_str, crits in criteria.items():
+                for cid, cd in crits.items():
+                    if cd.get("score", 0) == 0 and cd.get("max", 0) > 0:
+                        review_items.append(f"{r.get('student_name','?')} Q{qid_str} {cd['name']}: 0/{cd['max']}分")
+        if review_items:
+            with st.expander(f"🔍 核查提醒：{len(review_items)} 个评分项为0分", expanded=len(review_items) <= 10):
+                for item in review_items[:50]:
+                    st.caption(item)
+                if len(review_items) > 50:
+                    st.caption(f"... 还有 {len(review_items) - 50} 项")
+
+        if failed:
+            stat.text(f"✅ {cn} 完成！成功 {len(results)}/{len(class_papers)}，失败 {len(failed)}")
+            with st.expander(f"⚠ {len(failed)} 份提取失败"):
+                for f in failed:
+                    st.caption(f)
+        else:
+            stat.text(f"✅ {cn} 完成！共 {len(results)} 份")
+
+        # ---- 查重（班级内） ----
+        auto_zero_files = set()
+        plag_pairs_count = 0
+        if check_plag and len(class_papers) >= 2:
+            with st.spinner(f"🔍 {cn} 查重中..."):
                 from src.plagiarism import check_all as run_plag
                 plag_rpt = os.path.join(out_dir, "查重报告.xlsx")
-                # 收集所有涉及的实际班级目录
-                scan_dirs = []
-                for _, display, _ in paper_files:
-                    cn = display.split("/")[0]
-                    pd = os.path.join("data", "papers", cn)
-                    if os.path.isdir(pd) and pd not in scan_dirs:
-                        scan_dirs.append(pd)
-                if not scan_dirs:
-                    scan_dirs = [os.path.join("data", "papers", class_name)]
-                all_pairs = []
-                for pd in scan_dirs:
-                    pairs = run_plag(pd, [], plag_rpt if len(scan_dirs) == 1
-                        else os.path.join(out_dir, f"查重报告_{os.path.basename(pd)}.xlsx"))
+                # 查重目录：优先 data/papers/<班级名>，否则从实际试卷路径反推
+                pdir = os.path.join("data", "papers", cn)
+                if not os.path.isdir(pdir) and class_papers:
+                    # 取第一份试卷的实际父目录作为查重范围
+                    first_pp = class_papers[0][0]
+                    pdir = os.path.dirname(first_pp)
+                    # 如果是学生子文件夹，再往上一级（班级根目录）
+                    if os.path.basename(pdir) not in ["", cn] and not os.path.basename(pdir).startswith(cn):
+                        parent = os.path.dirname(pdir)
+                        if os.path.isdir(parent):
+                            pdir = parent
+                if os.path.isdir(pdir):
+                    st.caption(f"查重范围：{pdir}")
+                    pairs, auto_zero = run_plag(pdir, results, plag_rpt)
                     if pairs:
-                        all_pairs.extend(pairs)
-                if all_pairs:
-                    st.session_state._plag_pairs = len(all_pairs)
-                    st.success(f"查重完成，{len(all_pairs)} 对可疑")
+                        plag_pairs_count = len(pairs)
+                        auto_zero_files = auto_zero
+                        # 级别统计
+                        level_counts = defaultdict(int)
+                        for p in pairs:
+                            level_counts[p.get("level", "normal")] += 1
+                        st.info(
+                            f"查重结果：{len(pairs)} 对可疑 | "
+                            + " | ".join(f"{PLAG_LEVELS.get(k,{}).get('label',k)}: {v}对"
+                                         for k, v in sorted(level_counts.items()))
+                        )
+                        if auto_zero_files:
+                            st.error(f"🚫 {len(auto_zero_files)} 名学生确认抄袭（可疑度≥300），总分已清零！")
+                    else:
+                        st.success("未发现可疑抄袭")
+                else:
+                    st.warning(f"查重目录不存在：{pdir}，跳过查重")
 
-    st.session_state.grading_results = results
-    st.session_state.current_class = class_name
+        # ---- 自动判零 ----
+        if auto_zero_files:
+            for r in results:
+                src = r.get("_source_file", "")
+                if src in auto_zero_files:
+                    r["total_score"] = 0
+                    r["总分"] = 0
+                    r["_auto_zero"] = True
+                    for q in rubric["questions"]:
+                        r[q["name"]] = 0
+                        r[f"q{q['id']}_score"] = 0
+
+        plag_summary[cn] = {"pairs": plag_pairs_count, "auto_zero": len(auto_zero_files)}
+
+        # ---- 生成班级得分表 ----
+        if results:
+            summary_data = []
+            for r in results:
+                item = {"student_id": r.get("student_id", r.get("学号", "")),
+                        "student_name": r.get("student_name", r.get("姓名", "")),
+                        "class_name": cn, "total_score": r.get("total_score", r.get("总分", 0)),
+                        "_criteria": r.get("_criteria", {})}
+                for q in rubric["questions"]:
+                    item[f"q{q['id']}_score"] = r.get(q["name"], r.get(f"q{q['id']}_score", 0))
+                summary_data.append(item)
+            class_summary_report(summary_data, rubric, out_dir, safe_class)
+
+        all_class_results[cn] = results
+        all_class_failed[cn] = failed
+
+    # ---- 所有班级完成 ----
+    st.session_state.grading_results = all_class_results
+    st.session_state.current_class = " + ".join(by_class.keys())
+    st.session_state._plag_summary = plag_summary
 
     st.divider()
-    st.subheader("成绩总览")
+    st.subheader("📊 成绩总览")
 
-    if results:
+    for cn, results in all_class_results.items():
+        if not results:
+            continue
+
+        auto_count = sum(1 for r in results if r.get("_auto_zero"))
+        st.markdown(f"### {cn}（{len(results)} 人" + (f"，🚫 {auto_count} 人判零" if auto_count else "") + "）")
+
         df = pd.DataFrame(results)
         df = df.sort_values("总分", ascending=False).reset_index(drop=True)
         df.index = range(1, len(df) + 1)
@@ -431,7 +496,20 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                 if v < 60: return "background-color: #FFC7CE; font-weight: bold"
             return ""
 
-        st.dataframe(df.style.map(hl, subset=["总分"]), use_container_width=True,
+        display_cols = ["student_id", "student_name", "总分"] + [q["name"] for q in rubric["questions"]]
+        display_cols = [c for c in display_cols if c in df.columns]
+        df_display = df[display_cols]
+
+        styled = df_display.style.map(hl, subset=["总分"])
+        if auto_count:
+            # 给判零行加背景色
+            zero_idx = set(df.index[df["_auto_zero"] == True].tolist()) if "_auto_zero" in df.columns else set()
+
+            def row_style(row):
+                return ["background-color: #FFD7D7" if row.name in zero_idx else ""] * len(row)
+            styled = styled.apply(row_style, axis=1)
+
+        st.dataframe(styled, use_container_width=True,
                      height=min(400, 35 * len(df) + 38))
 
         m1, m2, m3, m4 = st.columns(4)
@@ -440,18 +518,23 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         m3.metric("最低分", f"{df['总分'].min()}")
         m4.metric("及格率", f"{(df['总分'] >= 60).sum() / len(df) * 100:.0f}%")
 
-        st.divider()
+        # 下载按钮
+        out_dir = os.path.join("output", cn)
         dl1, dl2 = st.columns(2)
         with dl1:
-            sp = os.path.join(out_dir, f"评分汇总_{safe_class}.xlsx")
+            sp = os.path.join(out_dir, f"评分汇总_{cn}.xlsx")
             if os.path.exists(sp):
                 with open(sp, "rb") as f:
-                    st.download_button("班级得分表", f.read(), file_name=f"评分汇总_{safe_class}.xlsx")
+                    st.download_button(f"📥 得分表_{cn}", f.read(),
+                                       file_name=f"评分汇总_{cn}.xlsx", key=f"dl1_{cn}")
+            else:
+                st.caption("得分表未生成")
         with dl2:
             plag_rpt = os.path.join(out_dir, "查重报告.xlsx")
             if os.path.exists(plag_rpt):
                 with open(plag_rpt, "rb") as f:
-                    st.download_button("查重报告", f.read(), file_name="查重报告.xlsx")
+                    st.download_button(f"📥 查重报告_{cn}", f.read(),
+                                       file_name=f"查重报告_{cn}.xlsx", key=f"dl2_{cn}")
             else:
                 plag_files = glob.glob(os.path.join(out_dir, "查重报告_*.xlsx"))
                 if plag_files:
@@ -459,6 +542,9 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                     with zipfile.ZipFile(zb2, "w", zipfile.ZIP_DEFLATED) as zf:
                         for pf in plag_files:
                             zf.write(pf, os.path.basename(pf))
-                    st.download_button("查重报告(ZIP)", zb2.getvalue(), file_name=f"查重报告_{safe_class}.zip")
+                    st.download_button(f"📥 查重报告(ZIP)_{cn}", zb2.getvalue(),
+                                       file_name=f"查重报告_{cn}.zip", key=f"dlzip_{cn}")
                 else:
-                    st.caption("查重报告：未生成（需≥2份试卷且勾选查重）")
+                    st.caption("查重报告：未生成")
+
+        st.markdown("---")
