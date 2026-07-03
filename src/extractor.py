@@ -84,7 +84,7 @@ def extract(docx_path: str, output_dir: str = "output") -> dict:
                     embedded_files.append((nested, os.path.splitext(nested)[1]))
 
     # ---- 5. 解析学生信息 ----
-    student_info = _parse_student_info(paragraphs, tables)
+    student_info = _parse_student_info(paragraphs, tables, docx_path)
 
     return {
         "file_name": file_name,
@@ -263,15 +263,14 @@ def extract_from_student_folder(docx_path: str, output_dir: str = "output",
     return paper
 
 
-def _parse_student_info(paragraphs: list, tables: list) -> dict:
-    """从段落和表格中提取学生信息"""
+def _parse_student_info(paragraphs: list, tables: list, docx_path: str = "") -> dict:
+    """从段落、表格、文件夹名中提取学生信息"""
+    import re
     info = {"学号": "", "姓名": "", "班级": ""}
 
     # 从段落中查找
     for i, text in paragraphs:
         if '班级' in text and '姓名' in text and '学号' in text:
-            # 尝试解析 "班级  数媒2501  姓名  李杰鸿  学号 255102030101"
-            import re
             for field in ['班级', '姓名', '学号']:
                 pattern = rf'{field}\s*(\S+)'
                 m = re.search(pattern, text)
@@ -285,7 +284,6 @@ def _parse_student_info(paragraphs: list, tables: list) -> dict:
             for row in table:
                 row_text = ' '.join(row)
                 if '学号' in row_text or '姓名' in row_text:
-                    # 尝试解析
                     for i, cell in enumerate(row):
                         if '学号' in cell and i + 1 < len(row):
                             info['学号'] = row[i + 1].strip()
@@ -293,4 +291,20 @@ def _parse_student_info(paragraphs: list, tables: list) -> dict:
                             info['姓名'] = row[i + 1].strip()
                         if '班级' in cell and i + 1 < len(row):
                             info['班级'] = row[i + 1].strip()
+
+    # 兜底：从文件夹名提取（如 255102030101李杰鸿 或 255102030101_李杰鸿）
+    if not info.get("学号") and docx_path:
+        import os
+        parent = os.path.basename(os.path.dirname(docx_path))
+        sid_match = re.search(r'(\d{11,12})', parent)
+        if sid_match:
+            info['学号'] = sid_match.group(1)
+        name_match = re.search(r'[一-鿿]{2,4}', parent)
+        if name_match:
+            info['姓名'] = name_match.group(0)
+        # 班级：从上级目录名提取（如 data/papers/软件2501/学生文件夹/docx）
+        grandparent = os.path.basename(os.path.dirname(os.path.dirname(docx_path)))
+        if re.match(r'^[一-鿿_a-zA-Z]+\d{2,}', grandparent):
+            info['班级'] = grandparent
+
     return info

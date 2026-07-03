@@ -150,96 +150,151 @@ def individual_report(student: dict, all_scores: dict, rubric: dict,
 
 def class_summary_report(results: list, rubric: dict, output_dir: str,
                          class_name: str) -> str:
-    """单个班级的汇总表"""
+    """单个班级的汇总表 —— 得分项列式展示"""
     if not results:
         return ""
 
     questions = rubric["questions"]
     wb = Workbook()
 
-    # ===== Sheet 1: 成绩表 =====
+    # ===== Sheet 1: 成绩表（得分项列式） =====
     ws = wb.active
     ws.title = f"{class_name}"
 
-    # 动态表头
-    headers = ["序号", "学号", "姓名"]
+    # 构建列映射: [(题号, 题目名, 题满分, [(得分项id, 得分项名, 满分), ...]), ...]
+    col_map = []  # [(qid, qname, qmax, [(cid, cname, cmax), ...]), ...]
     for q in questions:
-        headers.append(f"{q['name']}({q['max_score']})")
-    headers += ["总分", "等级"]
-    col_count = len(headers)
-    # 题号起始列 = 4
-    q_start_col = 4
+        items = [(c["id"], c["name"], c["max"]) for c in q["criteria"]]
+        col_map.append((q["id"], q["name"], q["max_score"], items))
 
-    # 标题
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=col_count)
-    ws['A1'] = f"《{rubric['exam']['name']}》{class_name} 成绩表"
-    ws['A1'].font = TITLE_FONT
-    ws['A1'].alignment = CENTER
+    # 计算总列数
+    fixed_cols = 3  # 序号, 学号, 姓名
+    criterion_cols = sum(len(items) for _, _, _, items in col_map)
+    total_cols = fixed_cols + criterion_cols + 2  # +总分 +平均分
 
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=col_count)
-    ws['A2'] = f"共 {len(results)} 人 | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    ws['A2'].font = NORMAL_FONT
-    ws['A2'].alignment = CENTER
-
-    # 表头
-    for col, h in enumerate(headers, 1):
-        c = ws.cell(row=4, column=col, value=h)
-        c.font = HEADER_FONT; c.fill = HEADER_FILL; c.border = THIN_BORDER; c.alignment = CENTER
-
-    # 学生数据
-    row = 5
-    cls_total = 0
-    maxes = [q["max_score"] for q in questions]
     total_max = rubric["exam"]["total_score"]
 
-    for i, r in enumerate(results):
-        ws.cell(row=row, column=1, value=i + 1).font = NORMAL_FONT
-        ws.cell(row=row, column=1).alignment = CENTER
-        ws.cell(row=row, column=2, value=r.get("student_id", "")).font = NORMAL_FONT
-        ws.cell(row=row, column=3, value=r.get("student_name", "")).font = NORMAL_FONT
+    # ---- 行1: 标题 ----
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    ws['A1'] = f"《{rubric['exam']['name']}》{class_name} 成绩表"
+    ws['A1'].font = TITLE_FONT; ws['A1'].alignment = CENTER
 
-        for qi, q in enumerate(questions):
-            qid = q["id"]
-            sc = r.get(f"q{qid}_score", 0)
-            col = q_start_col + qi
-            ws.cell(row=row, column=col, value=sc).font = NORMAL_FONT
-            ws.cell(row=row, column=col).alignment = CENTER
-            if sc >= q["max_score"] * 0.9:
-                ws.cell(row=row, column=col).fill = PASS_FILL
-            elif q["max_score"] > 0 and sc < q["max_score"] * 0.5:
-                ws.cell(row=row, column=col).fill = FAIL_FILL
+    # ---- 行2: 大题表头（合并） ----
+    ws.merge_cells(start_row=2, start_column=1, end_row=3, end_column=1)
+    ws.cell(row=2, column=1, value="序号").font = HEADER_FONT
+    ws.cell(row=2, column=1).fill = HEADER_FILL; ws.cell(row=2, column=1).border = THIN_BORDER; ws.cell(row=2, column=1).alignment = CENTER
+    ws.merge_cells(start_row=2, start_column=2, end_row=3, end_column=2)
+    ws.cell(row=2, column=2, value="学号").font = HEADER_FONT
+    ws.cell(row=2, column=2).fill = HEADER_FILL; ws.cell(row=2, column=2).border = THIN_BORDER; ws.cell(row=2, column=2).alignment = CENTER
+    ws.merge_cells(start_row=2, start_column=3, end_row=3, end_column=3)
+    ws.cell(row=2, column=3, value="姓名").font = HEADER_FONT
+    ws.cell(row=2, column=3).fill = HEADER_FILL; ws.cell(row=2, column=3).border = THIN_BORDER; ws.cell(row=2, column=3).alignment = CENTER
+
+    cur_col = fixed_cols + 1
+    for qid, qname, qmax, items in col_map:
+        n = len(items)
+        if n > 1:
+            ws.merge_cells(start_row=2, start_column=cur_col, end_row=2, end_column=cur_col + n - 1)
+        c = ws.cell(row=2, column=cur_col, value=f"Q{qid} {qname}({qmax}分)")
+        c.font = HEADER_FONT; c.fill = HEADER_FILL; c.border = THIN_BORDER; c.alignment = CENTER
+        for j, (cid, cname, cmax) in enumerate(items):
+            cc = ws.cell(row=3, column=cur_col + j, value=f"{cname}\n({cmax}分)")
+            cc.font = Font(name="微软雅黑", size=8, bold=True, color="FFFFFF")
+            cc.fill = HEADER_FILL; cc.border = THIN_BORDER; cc.alignment = CENTER
+        cur_col += n
+
+    # 总分 + 平均分
+    ws.merge_cells(start_row=2, start_column=cur_col, end_row=3, end_column=cur_col)
+    ws.cell(row=2, column=cur_col, value="总分").font = HEADER_FONT
+    ws.cell(row=2, column=cur_col).fill = HEADER_FILL; ws.cell(row=2, column=cur_col).border = THIN_BORDER; ws.cell(row=2, column=cur_col).alignment = CENTER
+    total_score_col = cur_col
+    cur_col += 1
+    ws.merge_cells(start_row=2, start_column=cur_col, end_row=3, end_column=cur_col)
+    ws.cell(row=2, column=cur_col, value="平均分").font = HEADER_FONT
+    ws.cell(row=2, column=cur_col).fill = HEADER_FILL; ws.cell(row=2, column=cur_col).border = THIN_BORDER; ws.cell(row=2, column=cur_col).alignment = CENTER
+
+    # ---- 学生数据 ----
+    row = 4
+    all_criterion_sums = {cid: 0.0 for _, _, _, items in col_map for cid, _, _ in items}
+    all_criterion_counts = {cid: 0 for _, _, _, items in col_map for cid, _, _ in items}
+    total_sum = 0.0
+
+    for i, r in enumerate(results):
+        ws.cell(row=row, column=1, value=i + 1).font = NORMAL_FONT; ws.cell(row=row, column=1).alignment = CENTER
+        ws.cell(row=row, column=1).border = THIN_BORDER
+        ws.cell(row=row, column=2, value=r.get("student_id", "")).font = NORMAL_FONT; ws.cell(row=row, column=2).border = THIN_BORDER
+        ws.cell(row=row, column=3, value=r.get("student_name", "")).font = NORMAL_FONT; ws.cell(row=row, column=3).border = THIN_BORDER
+
+        cur_col = fixed_cols + 1
+        student_total = 0
+        criteria = r.get("_criteria", {})
+        for qid, qname, qmax, items in col_map:
+            q_criteria = criteria.get(str(qid), {})
+            for cid, cname, cmax in items:
+                cd = q_criteria.get(cid, {})
+                sc = cd.get("score", 0)
+                ws.cell(row=row, column=cur_col, value=sc).font = NORMAL_FONT
+                ws.cell(row=row, column=cur_col).alignment = CENTER
+                ws.cell(row=row, column=cur_col).border = THIN_BORDER
+                if cmax > 0 and sc >= cmax * 0.9:
+                    ws.cell(row=row, column=cur_col).fill = PASS_FILL
+                elif cmax > 0 and sc < cmax * 0.5:
+                    ws.cell(row=row, column=cur_col).fill = FAIL_FILL
+                student_total += sc
+                all_criterion_sums[cid] = all_criterion_sums.get(cid, 0) + sc
+                all_criterion_counts[cid] = all_criterion_counts.get(cid, 0) + 1
+                cur_col += 1
 
         total = r.get("total_score", 0)
-        total_col = q_start_col + len(questions)
-        grade_col = total_col + 1
-        ws.cell(row=row, column=total_col, value=total).font = BOLD_FONT
-        ws.cell(row=row, column=total_col).alignment = CENTER
-        ws.cell(row=row, column=grade_col, value=_grade(total, total_max)).font = BOLD_FONT
-        ws.cell(row=row, column=grade_col).alignment = CENTER
+        if total == 0 and student_total == 0:
+            total = student_total
+        ws.cell(row=row, column=total_score_col, value=total).font = BOLD_FONT
+        ws.cell(row=row, column=total_score_col).alignment = CENTER
+        ws.cell(row=row, column=total_score_col).border = THIN_BORDER
+        avg_val = round(total / total_max * 100, 1) if total_max > 0 else 0
+        ws.cell(row=row, column=total_score_col + 1, value=f"{avg_val:.1f}").font = NORMAL_FONT
+        ws.cell(row=row, column=total_score_col + 1).alignment = CENTER
+        ws.cell(row=row, column=total_score_col + 1).border = THIN_BORDER
 
         if total < 60:
-            for c in range(1, col_count + 1):
+            for c in range(1, total_cols + 1):
                 ws.cell(row=row, column=c).font = RED_FONT
 
-        for c in range(1, col_count + 1):
-            ws.cell(row=row, column=c).border = THIN_BORDER
-
-        cls_total += total
+        total_sum += total
         row += 1
 
-    # 平均行
+    # ---- 平均行 ----
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
-    ws.cell(row=row, column=1, value="  平均分").font = BOLD_FONT
-    for qi, q in enumerate(questions):
-        qid = q["id"]
-        scores = [r.get(f"q{qid}_score", 0) for r in results]
-        avg = round(sum(scores) / len(scores), 1)
-        ws.cell(row=row, column=q_start_col + qi, value=avg).font = BOLD_FONT
-        ws.cell(row=row, column=q_start_col + qi).alignment = CENTER
-    ws.cell(row=row, column=total_col, value=round(cls_total / len(results), 1)).font = BOLD_FONT
-    ws.cell(row=row, column=total_col).alignment = CENTER
-    for c in range(1, col_count + 1):
+    ws.cell(row=row, column=1, value="  平均").font = BOLD_FONT
+    ws.cell(row=row, column=1).border = THIN_BORDER; ws.cell(row=row, column=1).alignment = CENTER
+    for c in range(2, 4):
         ws.cell(row=row, column=c).border = THIN_BORDER
+
+    cur_col = fixed_cols + 1
+    for qid, qname, qmax, items in col_map:
+        for cid, cname, cmax in items:
+            cnt = all_criterion_counts.get(cid, 1)
+            avg = round(all_criterion_sums.get(cid, 0) / cnt, 1) if cnt > 0 else 0
+            ws.cell(row=row, column=cur_col, value=avg).font = BOLD_FONT
+            ws.cell(row=row, column=cur_col).alignment = CENTER
+            ws.cell(row=row, column=cur_col).border = THIN_BORDER
+            cur_col += 1
+
+    total_avg = round(total_sum / len(results), 1) if results else 0
+    ws.cell(row=row, column=total_score_col, value=total_avg).font = BOLD_FONT
+    ws.cell(row=row, column=total_score_col).alignment = CENTER
+    ws.cell(row=row, column=total_score_col).border = THIN_BORDER
+    pct_avg = round(total_avg / total_max * 100, 1) if total_max > 0 else 0
+    ws.cell(row=row, column=total_score_col + 1, value=f"{pct_avg:.1f}").font = BOLD_FONT
+    ws.cell(row=row, column=total_score_col + 1).alignment = CENTER
+    ws.cell(row=row, column=total_score_col + 1).border = THIN_BORDER
+
+    # 列宽
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 10
+    for col in range(4, total_cols + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 10
 
     # ===== Sheet 2: 统计 =====
     ws2 = wb.create_sheet("统计")
