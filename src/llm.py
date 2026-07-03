@@ -7,12 +7,17 @@ import os
 import re
 import hashlib
 import base64
+import threading
 from openai import OpenAI
 
 
 _client = None
 _config = {}
 _vision_available = True
+_cache = {}          # LLM 结果缓存: {cache_key: result_dict}
+_cache_lock = threading.Lock()  # 缓存线程安全锁
+_cache_hits = 0       # 缓存命中计数
+_cache_misses = 0     # 缓存未命中计数
 
 
 def init_llm(config: dict):
@@ -120,27 +125,61 @@ def _call_vision(prompt: str, image_paths: list, model: str = None,
 
 
 def grade_with_text(prompt: str, question_id: int) -> dict:
-    """纯文字评分"""
+    """纯文字评分（带缓存，线程安全）"""
+    global _cache_hits, _cache_misses
+    model = _config.get("model", "deepseek-chat")
+    cache_key = f"text:{hashlib.md5((prompt + model).encode()).hexdigest()[:16]}"
+
+    with _cache_lock:
+        if cache_key in _cache:
+            _cache_hits += 1
+            cached = _cache[cache_key].copy()
+            cached["tokens_in"] = 0
+            cached["tokens_out"] = 0
+            cached["raw_response"] = "[cached] " + cached.get("raw_response", "")[:50]
+            return cached
+
+    _cache_misses += 1
     result = _call_text(prompt)
     scores = _parse_json(result["content"])
-    return {
+    final = {
         **scores,
         "tokens_in": result["tokens_in"],
         "tokens_out": result["tokens_out"],
         "raw_response": result["content"],
     }
+    with _cache_lock:
+        _cache[cache_key] = final
+    return final
 
 
 def grade_with_vision(prompt: str, image_paths: list, question_id: int) -> dict:
-    """视觉评分（不支持视觉时自动降级为纯文字）"""
+    """视觉评分（不支持视觉时自动降级为纯文字，带缓存，线程安全）"""
+    global _cache_hits, _cache_misses
+    model = _config.get("vision_model", _config.get("model", "deepseek-chat"))
+    cache_key = f"vision:{hashlib.md5((prompt + model).encode()).hexdigest()[:16]}"
+
+    with _cache_lock:
+        if cache_key in _cache:
+            _cache_hits += 1
+            cached = _cache[cache_key].copy()
+            cached["tokens_in"] = 0
+            cached["tokens_out"] = 0
+            cached["raw_response"] = "[cached] " + cached.get("raw_response", "")[:50]
+            return cached
+
+    _cache_misses += 1
     result = _call_vision(prompt, image_paths)
     scores = _parse_json(result["content"])
-    return {
+    final = {
         **scores,
         "tokens_in": result["tokens_in"],
         "tokens_out": result["tokens_out"],
         "raw_response": result["content"],
     }
+    with _cache_lock:
+        _cache[cache_key] = final
+    return final
 
 
 def _parse_json(text: str) -> dict:
@@ -166,6 +205,29 @@ def _parse_json(text: str) -> dict:
 
 def hash_prompt(prompt: str) -> str:
     return hashlib.md5(prompt.encode()).hexdigest()[:12]
+
+
+def clear_cache():
+    """清空 LLM 结果缓存"""
+    global _cache, _cache_hits, _cache_misses
+    with _cache_lock:
+        _cache.clear()
+        _cache_hits = 0
+        _cache_misses = 0
+
+
+def cache_stats() -> dict:
+    """返回缓存统计"""
+    with _cache_lock:
+        size = len(_cache)
+        hits = _cache_hits
+        misses = _cache_misses
+    return {
+        "size": size,
+        "hits": hits,
+        "misses": misses,
+        "hit_rate": f"{hits / max(1, hits + misses) * 100:.0f}%"
+    }
 
 
 def tokens_cost(tokens_in: int, tokens_out: int) -> float:

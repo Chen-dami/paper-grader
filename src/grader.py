@@ -4,6 +4,7 @@
 import os, re
 import pandas as pd
 from . import llm
+from .video_frame_extractor import extract_frames as _extract_video_frames
 
 
 def grade(q_data: dict, question: dict, config: dict) -> dict:
@@ -14,6 +15,10 @@ def grade(q_data: dict, question: dict, config: dict) -> dict:
     try:
         if _is_empty(q_data, gtype):
             return _zero_score(criteria, max_score, "内容为空")
+
+        if _is_borderline(q_data, gtype) and gtype != "code":
+            if _llm_check_empty(q_data, question):
+                return _zero_score(criteria, max_score, "AI判定内容为空")
 
         tier = _detect_tier(q_data, question)
 
@@ -71,13 +76,46 @@ def _detect_tier(q_data: dict, question: dict) -> str:
     has_excel = bool(q_data.get("excel_path") or q_data.get("has_excel_file"))
     has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
 
+    # 素材完整度判断（在档位匹配之前）
+    required_materials = _get_required_materials(gtype, name, question)
+    if required_materials:
+        missing = [m for m in required_materials if not _material_present(m, has_video, has_images, has_screenshot, has_excel, has_link)]
+        if len(missing) >= 2:
+            return "素材不足" if "素材不足" in tiers_cfg else "敷衍"
+
     for tk in tiers_cfg:
-        if tk in ("空", "敷衍", "跑题", "贴合主题"):
+        if tk in ("空", "敷衍", "跑题", "贴合主题", "素材不足"):
             continue
         if _flag_match(tk, gtype, name, has_video, has_images, has_screenshot, has_excel, has_link):
             return tk
 
     return "贴合主题"
+
+
+def _get_required_materials(gtype, name, question):
+    """根据题目类型和名称推断必需素材"""
+    materials = []
+    if gtype == "vision" and "视频" in name:
+        materials.extend(["video", "images", "screenshot"])
+    elif gtype == "vision":
+        materials.extend(["images", "screenshot"])
+    elif gtype == "code":
+        materials.extend(["excel", "screenshot"])
+    elif gtype == "hybrid":
+        materials.extend(["screenshot", "link"])
+        if "知识库" in str(question.get("description", "")):
+            materials.append("excel")
+    return materials
+
+
+def _material_present(mat, has_video, has_images, has_screenshot, has_excel, has_link):
+    return {
+        "video": has_video,
+        "images": has_images,
+        "screenshot": has_screenshot,
+        "excel": has_excel,
+        "link": has_link,
+    }.get(mat, True)
 
 
 def _flag_match(tk, gtype, name, has_video, has_images, has_screenshot, has_excel, has_link):
@@ -90,8 +128,10 @@ def _flag_match(tk, gtype, name, has_video, has_images, has_screenshot, has_exce
         return (tk == "有截图" and has_screenshot) or (tk == "无截图" and not has_screenshot)
     if tk in ("有表格", "无表格") and gtype == "code":
         return (tk == "有表格" and has_excel) or (tk == "无表格" and not has_excel)
-    if tk in ("有链接", "无链接") and gtype == "hybrid":
-        return (tk == "有链接" and has_link) or (tk == "无链接" and not has_link)
+    if tk in ("有链接", "无链接"):
+        # hybrid 或智能体类题目
+        if gtype == "hybrid" or "智能体" in name:
+            return (tk == "有链接" and has_link) or (tk == "无链接" and not has_link)
     return False
 
 
@@ -116,13 +156,72 @@ def _is_empty(q_data: dict, gtype: str) -> bool:
     if gtype == "code":
         has_file = bool(q_data.get("excel_path") or q_data.get("has_excel_file"))
         return not has_file and not q_data.get("has_screenshot")
-    text_fields = ["prompt_text", "result_text", "image_prompt", "video_prompt",
-                   "persona_text", "all_table_text"]
-    all_text = "".join(str(q_data.get(k, "")) for k in text_fields)
+    # 各题型关键内容字段
+    key_fields = {
+        "text": ["prompt_text", "result_text"],
+        "vision": ["prompt_text", "image_prompt", "video_prompt"],
+        "hybrid": ["persona_text"],
+    }
+    fields = key_fields.get(gtype, ["prompt_text", "result_text"])
+    key_text = "".join(str(q_data.get(k, "")) for k in fields)
+    # vision: 有生成图就不算空
     if gtype == "vision":
+        has_media = bool(q_data.get("generated_images") or q_data.get("reference_image"))
+        return len(key_text.strip()) < 15 and not has_media
+    # hybrid: 有 bot_link 或 persona_text > 30 就不算空
+    if gtype == "hybrid":
+        has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
+        return len(key_text.strip()) < 30 and not has_link
+    # text: 主要文本 > 15 字
+    return len(key_text.strip()) < 15
+
+
+def _is_borderline(q_data: dict, gtype: str) -> bool:
+    """内容处于边界——规则已判定非空，但用LLM二次确认"""
+    if gtype == "code":
+        return False
+    if gtype == "hybrid":
+        persona = str(q_data.get("persona_text", "")).strip()
+        has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
+        # persona < 80字 且 无链接 → 边界
+        return len(persona) < 80 and not has_link
+    if gtype == "vision":
+        prompt_text = str(q_data.get("prompt_text", "")).strip()
         has_images = bool(q_data.get("generated_images") or q_data.get("reference_image"))
-        return len(all_text.strip()) < 10 and not has_images
-    return len(all_text.strip()) < 10
+        return len(prompt_text) < 30 and not has_images
+    return False
+
+
+def _llm_check_empty(q_data: dict, question: dict) -> bool:
+    """LLM判断提交是否实质为空。返回 True=空, False=有内容。失败时返回规则判断结果。"""
+    content_parts = []
+    for key, label in [("prompt_text", "提示词"), ("persona_text", "人设/逻辑"),
+                        ("result_text", "结果"), ("video_prompt", "视频提示词")]:
+        v = q_data.get(key, "")
+        if isinstance(v, str) and v.strip():
+            content_parts.append(f"{label}: {v.strip()[:200]}")
+    if q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")):
+        content_parts.append(f"链接: {q_data['bot_link']}")
+    if q_data.get("has_video"):
+        content_parts.append("有视频文件")
+    if q_data.get("has_screenshot"):
+        content_parts.append("有截图")
+    content = "\n".join(content_parts) if content_parts else "（无内容）"
+    # 先做规则兜底：无任何实质内容直接判空
+    if not content_parts:
+        return True
+    prompt = (
+        f"题目：{question.get('name', '')}\n"
+        f"学生提交：\n{content[:800]}\n\n"
+        "这个学生是否实质性地完成了这道题？只回答一个字：是 或 否"
+    )
+    try:
+        result = llm.grade_with_text(prompt, 0)
+        ans = result.get("raw_response", "").strip()
+        return "是" in ans and "否" not in ans
+    except Exception:
+        # LLM不可用时用规则兜底
+        return not content_parts
 
 
 def _zero_score(criteria: list, max_score: int, msg: str) -> dict:
@@ -165,6 +264,10 @@ def _grade_code(q_data: dict, question: dict, tier: str, config: dict) -> dict:
         try:
             df = pd.read_excel(excel_path)
             scores, reasons = _run_data_checks(df, criteria, data_checks, mode)
+        except PermissionError as e:
+            for c in criteria:
+                scores[c["id"]] = max(1, int(c["max"] * base_ratio))
+                reasons[c["id"]] = f"文件被占用({str(e)[:40]})"
         except Exception as e:
             for c in criteria:
                 scores[c["id"]] = max(1, int(c["max"] * base_ratio) - 1)
@@ -216,16 +319,23 @@ def _grade_code(q_data: dict, question: dict, tier: str, config: dict) -> dict:
 def _run_data_checks(df: pd.DataFrame, criteria: list, data_checks: dict,
                      mode: str) -> tuple:
     scores, reasons = {}, {}
-    checks = []
-    if data_checks.get("dedup"): checks.append("dedup")
-    if data_checks.get("fillna"): checks.append("fillna")
-    if data_checks.get("date_format"): checks.append("date_format")
-    if data_checks.get("sort"): checks.append("sort")
-    checks.append("materials")
-    for i, c in enumerate(criteria):
-        chk = checks[i] if i < len(checks) else "generic"
-        s, r = _check_one(df, c, chk, data_checks, mode)
-        scores[c["id"]], reasons[c["id"]] = s, r
+    for c in criteria:
+        name = c.get("name", "")
+        cid = c["id"]
+        if "缺失" in name or "空值" in name:
+            check = "fillna"
+        elif "重复" in name or "去重" in name:
+            check = "dedup"
+        elif "格式" in name or "日期" in name or "排序" in name:
+            check = "date_sort"
+        elif "提交" in name or "完整" in name:
+            check = "materials"
+        elif "提示词" in name or "材料" in name:
+            check = "materials"
+        else:
+            check = "generic"
+        s, r = _check_one(df, c, check, data_checks, mode)
+        scores[cid], reasons[cid] = s, r
     return scores, reasons
 
 
@@ -238,7 +348,7 @@ def _check_one(df, criterion, check, data_checks, mode):
         return _base(ms, mode), f"残留{n}条重复"
     elif check == "fillna":
         cfg = data_checks.get("fillna", {})
-        pat = cfg.get("column_pattern", "") if isinstance(cfg, dict) else str(cfg)
+        pat = _get_column_pattern(cfg)
         col = _find_column(df, pat) if pat else None
         if col:
             nc = df[col].isna().sum()
@@ -246,32 +356,55 @@ def _check_one(df, criterion, check, data_checks, mode):
             if nc <= 3: return ms - 1 if mode == "relaxed" else max(1, ms - 2), f"「{col}」残留{nc}空值"
             return _base(ms, mode), f"「{col}」残留{nc}空值"
         return _base(ms, mode), "未找到目标列"
-    elif check == "date_format":
+    elif check == "date_sort":
         cfg = data_checks.get("date_format", {})
-        pat = cfg.get("column_pattern", "日期|时间|date") if isinstance(cfg, dict) else "日期|时间|date"
+        pat = _get_column_pattern(cfg, "日期|时间|date")
         col = _find_column(df, pat)
-        if col:
-            ss = df[col].dropna().astype(str)
-            rate = ss.str.match(r'\d{4}-\d{2}-\d{2}').sum() / len(ss) if len(ss) > 0 else 0
-            if rate >= 0.95: return ms, f"日期统一{rate:.0%}"
-            if rate >= 0.7: return ms - 1 if mode == "relaxed" else max(1, ms - 2), f"日期{rate:.0%}统一"
-            return _base(ms, mode), f"日期统一不足{rate:.0%}"
-        return _base(ms, mode), "未找到日期列"
+        if not col:
+            return _base(ms, mode), "未找到日期列"
+        # 日期格式检查
+        ss = df[col].dropna().astype(str)
+        fmt_ok = ss.str.match(r'\d{4}[/-]\d{1,2}[/-]\d{1,2}').sum()
+        rate = fmt_ok / len(ss) if len(ss) > 0 else 0
+        # 去重后排序检查
+        df_dedup = df.drop_duplicates()
+        try:
+            sv = pd.to_datetime(df_dedup[col], errors='coerce').dropna()
+            sorted_ok = all(sv.iloc[i] <= sv.iloc[i+1] for i in range(len(sv)-1))
+        except Exception:
+            sorted_ok = False
+        if rate >= 0.95 and sorted_ok:
+            return ms, f"日期格式统一({rate:.0%})且已排序"
+        elif rate >= 0.95:
+            return ms - 1 if mode == "relaxed" else max(1, ms - 2), f"日期格式OK但未排序"
+        elif sorted_ok:
+            return ms - 1 if mode == "relaxed" else max(1, ms - 2), f"已排序但日期格式不统一({rate:.0%})"
+        return _base(ms, mode), f"日期格式{rate:.0%}统一且未排序"
     elif check == "sort":
         cfg = data_checks.get("sort", {})
-        pat = cfg.get("column_pattern", "日期|时间|date") if isinstance(cfg, dict) else "日期|时间|date"
+        pat = _get_column_pattern(cfg, "日期|时间|date")
         col = _find_column(df, pat)
         if col:
             try:
-                sv = pd.to_datetime(df[col], errors='coerce').dropna()
+                df_dedup = df.drop_duplicates()
+                sv = pd.to_datetime(df_dedup[col], errors='coerce').dropna()
                 if all(sv.iloc[i] <= sv.iloc[i+1] for i in range(len(sv)-1)):
                     return ms, f"「{col}」排序正确"
                 return _base(ms, mode), f"「{col}」未排序"
             except Exception:
                 return _base(ms, mode), "排序检查失败"
         return _base(ms, mode), "未找到排序列"
+    elif check == "materials":
+        return ms, "提交完整"
     else:
         return _base(ms, mode), "通过"
+
+
+def _get_column_pattern(cfg, default=""):
+    """兼容 rubric 中的 column 和 column_pattern 两种字段名"""
+    if isinstance(cfg, dict):
+        return cfg.get("column_pattern", "") or cfg.get("column", "") or default
+    return str(cfg) if cfg else default
 
 
 def _find_column(df, pattern):
@@ -299,11 +432,16 @@ def _grade_llm(q_data, question, tier, config, use_vision=False):
     prompt = _build_llm_prompt(question, criteria, tier, ti.get("desc", ""),
                                 rmin, rmax, content_desc, max_score)
 
-    if use_vision:
-        images = _collect_images(q_data)
-        result = llm.grade_with_vision(prompt, images, question["id"]) if images else llm.grade_with_text(prompt, question["id"])
-    else:
-        result = llm.grade_with_text(prompt, question["id"])
+    try:
+        if use_vision:
+            images = _collect_images(q_data)
+            result = llm.grade_with_vision(prompt, images, question["id"]) if images else llm.grade_with_text(prompt, question["id"])
+        else:
+            result = llm.grade_with_text(prompt, question["id"])
+    except Exception as e:
+        result = _zero_score(criteria, max_score, f"LLM调用失败: {e}")
+        result["切题判断"] = tier
+        return result
 
     result["切题判断"] = tier
     return result
@@ -320,7 +458,13 @@ def _build_content_desc(q_data, question):
             parts.append(f"{label}：{val.strip()[:300]}")
 
     if q_data.get("has_video") and q_data.get("video_path"):
-        parts.append("视频文件：已提交")
+        vinfo = q_data.get("video_info", "")
+        if vinfo and vinfo.startswith("无效"):
+            parts.append(f"视频文件：检测到但无效（{vinfo}）")
+        elif vinfo:
+            parts.append(f"视频文件：已提交（{vinfo}）")
+        else:
+            parts.append("视频文件：已提交")
     elif "视频" in name:
         parts.append("视频文件：未检测到")
 
@@ -341,31 +485,56 @@ def _collect_images(q_data):
         v = q_data.get(k)
         if isinstance(v, list): imgs.extend(v)
         elif isinstance(v, str) and v: imgs.append(v)
+    # 有视频则提取帧加入评分
+    if q_data.get("has_video") and q_data.get("video_path"):
+        vframes = _extract_video_frames(q_data["video_path"], num_frames=4)
+        imgs.extend(vframes)
     return [i for i in imgs if i and os.path.exists(str(i))]
 
 
 def _build_llm_prompt(question, criteria, tier, desc, rmin, rmax, content_desc, max_score):
-    sr = f"{int(max_score * rmin)}-{int(max_score * rmax)}"
+    sr_lo = int(max_score * rmin)
+    sr_hi = int(max_score * rmax)
     cl = []
     for i, c in enumerate(criteria):
         cl.append(f"{i+1}. {c['name']}（{c['max']}分）：{c.get('desc','')}")
-    return f"""评分机器人。在档位范围内分配各评分项分数。
+    guidance = _tier_guidance(tier, int(rmin * 100), int(rmax * 100))
+    return f"""你是考试评分专家。根据档位严格分配各评分项分数。
 
 题目：{question['name']}（满分{max_score}分）
-评分标准：
+评分项：
 {chr(10).join(cl)}
 
 档位：{tier}{'（'+desc+'）' if desc else ''}
-分数范围：{sr}分
+总分上限：{sr_hi}分（{int(rmax*100)}%）总分下限：{sr_lo}分（{int(rmin*100)}%）
+{guidance}
 
 学生提交：
 {content_desc[:1500]}
 
-直接输出 JSON（不要 markdown）：
-{{"得分_{question['id']}-1_{criteria[0]['name']}":<int>,"得分_{question['id']}-2_{criteria[1]['name']}":<int>,...,"总分":<int>,"评语":"<15字>"}}
+输出 JSON（不要markdown）：
+{{"得分_{question['id']}-1_{criteria[0]['name']}":<int>,"得分_{question['id']}-2_{criteria[1]['name']}":<int>,...,"总分":<int>,"评语":"<20字>"}}
 
-- 各项得分 0-{max(c['max'] for c in criteria)}
-- 总分在 {sr} 之间"""
+铁则：
+- 总分必须在 {sr_lo} 到 {sr_hi} 之间，超出则错误
+- 学生完全没涉及的评分项必须给 0 分
+- 各项得分不超过该项满分"""
+
+
+def _tier_guidance(tier: str, pct_lo: int, pct_hi: int) -> str:
+    """根据档位生成评分指引"""
+    guides = {
+        "贴合主题": "学生内容紧扣主题，各项要求基本达标。应在高分范围给分，小问题不影响大局。",
+        "跑题": "学生内容偏离主题要求，但付出了努力。给基础分但不要高分。关键要求缺失应大幅扣分。",
+        "敷衍": "学生仅做了极少内容。只在有实质内容的评分项给少量分数，其余项给 0。",
+        "空": "学生未提交或内容极少。所有评分项均给 0 分。",
+        "素材不足": "学生提交了部分内容但关键素材缺失。有内容的项给基础分，缺失项给 0-1 分。",
+    }
+    if tier in guides:
+        return f"评分指引：{guides[tier]}"
+    if "视频" in tier or "截图" in tier or "表格" in tier or "链接" in tier:
+        return f"评分指引：关注对应素材的{'存在' if '有' in tier else '缺失'}情况。{'素材完整可给高分' if '有' in tier else '素材缺失应在该评分项扣分'}。"
+    return "评分指引：根据学生提交内容的完整度和质量合理分配分数。"
 
 
 def extract_scores(result: dict, question: dict) -> list:

@@ -138,44 +138,103 @@ with st.sidebar:
 
     st.divider()
 
-    # 个人信息
-    with st.expander("👤 个人信息"):
-        st.caption(f"姓名：{teacher}")
-        st.caption(f"角色：阅卷老师")
-        st.caption(f"当前模式：{mode_labels.get(cur_mode, cur_mode)}")
-        new_pw = st.text_input("修改密码", type="password", key="sb_pwd")
-        if new_pw and st.button("确认修改", key="sb_pwd_btn"):
-            uname = st.session_state.get("username", "admin")
-            users = load_users()
-            u = users.get(uname, {})
-            save_user(uname, new_pw, u.get("display_name", uname), u.get("role", "teacher"))
-            st.success("密码已修改")
-
-    # 常见问题
-    with st.expander("❓ 常见问题"):
-        st.caption("**Q: 如何导入评分标准？**")
-        st.caption("A: 在「阅卷」页上传 .docx 评分标准文档，系统自动解析。")
-        st.caption("**Q: 支持哪些试卷格式？**")
-        st.caption("A: .docx 格式。将试卷放入 data/papers/班级名/ 下。")
-        st.caption("**Q: 评分模式有什么区别？**")
-        st.caption("A: 宽松→有做就给分；标准→平衡；严格→有错必扣。")
-        st.caption("**Q: 查重怎么用？**")
-        st.caption("A: 阅卷时勾选「自动查重」，完成后下载查重报告。")
-
-    # 使用说明
-    with st.expander("📖 使用说明"):
-        st.caption("**1. 导入评分标准** → 阅卷页上传评分标准文档")
-        st.caption("**2. 准备试卷** → 放入 data/papers/班级名/ 文件夹")
-        st.caption("**3. 开始阅卷** → 选择班级 → 点击开始阅卷")
-        st.caption("**4. 查看结果** → 历史结果页查看成绩分布和明细")
-        st.caption("**5. 导出** → 下载班级汇总 / 个人明细 / 查重报告")
-        st.caption(f"API: DeepSeek | 数据库: SQLite | 默认端口: 8501")
+    if st.button("👤 个人信息", use_container_width=True):
+        st.session_state.dialog_type = "profile"
+    if st.button("❓ 常见问题", use_container_width=True):
+        st.session_state.dialog_type = "faq"
+    if st.button("📖 使用说明", use_container_width=True):
+        st.session_state.dialog_type = "guide"
 
     st.divider()
 
-    # 退出
     if st.button("🚪 退出登录", use_container_width=True):
         st.session_state.authenticated = False
         tf = "data/.session_token"
         if os.path.exists(tf): os.remove(tf)
         st.rerun()
+
+
+if "dialog_type" not in st.session_state:
+    st.session_state.dialog_type = None
+
+_dtype = st.session_state.dialog_type
+if _dtype is not None:
+    st.session_state.dialog_type = None
+    if _dtype == "profile":
+        _open_profile_dialog(teacher)
+    elif _dtype == "faq":
+        _open_faq_dialog()
+    elif _dtype == "guide":
+        _open_guide_dialog()
+
+
+@st.dialog("个人信息", width="small")
+def _open_profile_dialog(teacher_name):
+    uname = st.session_state.get("username", "admin")
+    users = load_users()
+    u = users.get(uname, {})
+    st.text_input("用户名", value=uname, disabled=True)
+    st.text_input("角色", value=u.get("role", "teacher"), disabled=True)
+    new_display = st.text_input("显示名", value=u.get("display_name", uname))
+    col1, col2 = st.columns(2)
+    with col1:
+        new_pw = st.text_input("新密码", type="password", placeholder="留空不修改")
+    with col2:
+        confirm_pw = st.text_input("确认密码", type="password", placeholder="再次输入")
+    if st.button("保存", type="primary", use_container_width=True):
+        if new_pw and new_pw != confirm_pw:
+            st.error("两次密码不一致")
+        elif new_pw and len(new_pw) < 6:
+            st.error("密码至少6位")
+        else:
+            if new_pw:
+                save_user(uname, new_pw, new_display.strip() or uname, u.get("role", "teacher"))
+            else:
+                import json
+                users2 = load_users()
+                users2[uname]["display_name"] = new_display.strip() or uname
+                with open("data/users.json", "w", encoding="utf-8") as f:
+                    json.dump(users2, f, ensure_ascii=False, indent=2)
+            st.session_state.teacher_name = f"{new_display.strip() or uname}老师"
+            st.success("已保存")
+            st.rerun()
+
+
+@st.dialog("常见问题", width="large")
+def _open_faq_dialog():
+    faq_items = [
+        ("如何导入评分标准？", "在「阅卷」页上传 .docx 评分标准文档，系统通过 AI 自动解析题目、评分项和提交要求。"),
+        ("支持哪些试卷格式？", "仅支持 .docx 格式。试卷放入 `data/papers/班级名/` 文件夹，系统自动扫描识别。"),
+        ("评分模式有什么区别？", "**宽松**：有做就给分，鼓励为主。\n\n**标准**：平衡给分，正常评判。\n\n**严格**：有错必扣，高标准要求。\n\n**自定义**：可自由设置各档位的分数比例。"),
+        ("评分模式和题目权重是什么关系？",
+         "**档位**控制答题质量→得分的乘数范围。例如20分题，「贴合主题」档在宽松模式下给 18-20 分，严格模式下给 15-20 分。\n\n"
+         "**权重**即每道题的 `max_score`，决定该题在总分中的占比。例如 Q1=15分（15%），Q5=25分（25%）→ Q5 对总分影响更大。\n\n"
+         "**最终总分 = Σ(题目i × 档位ratio)**，档位管单题给分高不高，权重管题目重不重要，二者独立。"),
+        ("查重怎么用？", "阅卷时勾选「自动查重」，完成后在结果页下载查重报告。支持元数据、文本、图片、Excel 多维比对。"),
+        ("大批量阅卷怎么加速？", "命令行模式支持多线程并行：`python main.py --workers 8`。系统还会自动缓存相同的 LLM 评分请求，省 token 也更快。"),
+    ]
+    search = st.text_input("搜索", placeholder="输入关键词过滤...", key="faq_search")
+    items = faq_items if not search else [
+        (q, a) for q, a in faq_items if search.lower() in q.lower() or search.lower() in a.lower()
+    ]
+    if not items:
+        st.caption("未找到匹配的问题")
+    for q, a in items:
+        with st.expander(q):
+            st.markdown(a)
+
+
+@st.dialog("使用说明", width="large")
+def _open_guide_dialog():
+    st.markdown("""
+| 步骤 | 操作 |
+|------|------|
+| 1. 导入评分标准 | 阅卷页 → 上传 .docx 评分标准文档 |
+| 2. 准备试卷 | 将 .docx 放入 `data/papers/班级名/` |
+| 3. 开始阅卷 | 选择班级 → 点击「开始阅卷」 |
+| 4. 查看结果 | 历史结果页查看成绩分布和明细 |
+| 5. 导出报告 | 下载班级汇总 / 个人明细(ZIP) / 查重报告 |
+
+- 评分标准只需导入一次，换班级直接阅卷
+- 命令行批量：`python main.py --workers 4 --check`
+""")

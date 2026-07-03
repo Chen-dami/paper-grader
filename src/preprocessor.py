@@ -5,6 +5,7 @@
 """
 import os, re, json
 from PIL import Image
+from .video_validator import quick_check as validate_video
 
 
 def process(paper_data: dict, rubric: dict, config: dict) -> dict:
@@ -337,6 +338,7 @@ def _extract_question(content_tables: list, question: dict,
         "has_screenshot": False,
         "has_video": False,
         "video_path": "",
+        "video_info": "",
         "has_excel_file": False,
         "excel_path": "",
         "bot_link": "",
@@ -379,18 +381,35 @@ def _extract_question(content_tables: list, question: dict,
     # 截图检测
     result["has_screenshot"] = len(images) >= 2 or _has_label(all_rows, ["截图", "screen"])
 
-    # 视频检测 —— 取第一个（文件夹文件已优先于docx内嵌）
-    if video_files:
-        result["has_video"] = True
-        result["video_path"] = video_files[0]
-    # 从段落文字兜底
-    for i, text in paragraphs:
-        if any(ext in text.lower() for ext in ['.mp4', '.avi', '.mov']):
+    # 视频检测 —— 仅 vision 类型且名称含"视频"的题目分配
+    _needs_video = (gtype == "vision" and ("视频" in qname or "video" in qname.lower()))
+    if video_files and _needs_video:
+        vpath = video_files[0]
+        is_valid, vinfo = validate_video(vpath)
+        result["has_video"] = is_valid
+        result["video_path"] = vpath if is_valid else ""
+        result["video_info"] = vinfo if is_valid else f"无效视频: {vinfo}"
+    elif video_files and not _needs_video:
+        # 从段落文字兜底（仅当题目明确提及视频）
+        para_has_video = False
+        for i, text in paragraphs:
+            if any(ext in text.lower() for ext in ['.mp4', '.avi', '.mov']):
+                para_has_video = True
+                break
+        if para_has_video and _needs_video:
             result["has_video"] = True
-            break
 
-    # Excel 检测 —— 取第一个（文件夹文件已优先于docx内嵌）
-    if excel_files:
+    # Excel 检测 —— 仅 code 类型分配（数据处理题）
+    # hybrid 类型若 submission_labels 中有明确的文件上传才分配
+    _needs_excel = (
+        gtype == "code" or
+        (gtype == "hybrid" and any(
+            "excel" in sl.get("label", "").lower() or
+            sl.get("type", "") == "file"
+            for sl in labels
+        ))
+    )
+    if excel_files and _needs_excel:
         result["has_excel_file"] = True
         result["excel_path"] = excel_files[0]
 
@@ -436,14 +455,24 @@ def _extract_question(content_tables: list, question: dict,
 
 def _extract_text_by_label(rows: list, labels: list) -> str:
     """根据标签关键词从行中提取最长文本"""
-    for row in rows:
+    for ri, row in enumerate(rows):
         row_str = " ".join(str(c) for c in row)
         for kw in labels:
             if kw in row_str:
+                # 先在当前行找长文本
                 texts = [str(c) for c in row if len(str(c)) > 20]
                 if texts:
                     return max(texts, key=len)
-    # 没找到标签，返回最长文本
+                # 当前行没有，检查后续行（跨行内容）
+                for next_row in rows[ri + 1:ri + 4]:
+                    next_texts = [str(c) for c in next_row if len(str(c)) > 5]
+                    # 排除后续行也是标签的情况
+                    non_label = [t for t in next_texts
+                                 if not any(kw2 in t for kw2 in ["截图", "链接", "提交", "文件", "图片", "视频"])]
+                    if non_label:
+                        return max(non_label, key=len)
+                return ""  # 标签找到但无内容 → 返回空
+    # 没找到任何标签 → 兜底返回最长文本
     return _longest_text(rows)
 
 
@@ -452,16 +481,26 @@ def _extract_content_after_label(rows: list, keywords: list) -> str:
     for i, row in enumerate(rows):
         row_str = " ".join(str(c) for c in row)
         for kw in keywords:
-            if kw in row_str and len(row_str) < 120:
-                # 标签行找到，取后续行的内容
-                for j in range(i + 1, min(i + 3, len(rows))):
-                    for c in rows[j]:
-                        s = str(c).strip()
-                        if s and len(s) > 5:
-                            # 排除也是标签的行
-                            if not any(kw2 in s for kw2 in ["截图", "链接", "提交", "文件"]):
-                                return s
-                return ""
+            if kw not in row_str:
+                continue
+            # 策略1：优先取后续行的内容（跨行布局）
+            for j in range(i + 1, min(i + 3, len(rows))):
+                for c in rows[j]:
+                    s = str(c).strip()
+                    if s and len(s) > 5:
+                        if not any(kw2 in s for kw2 in ["截图", "链接", "提交", "文件", "图片", "视频"]):
+                            return s
+            # 策略2：后续行无内容，从同单元格提取（标签+内容在同一格）
+            if len(row_str) > len(kw) + 10:
+                # 提取标签后面的部分
+                idx = row_str.find(kw)
+                if idx >= 0:
+                    after = row_str[idx + len(kw):].strip()
+                    # 去掉冒号等前缀标点
+                    after = after.lstrip("：:：、。， ")
+                    if len(after) > 3:
+                        return after
+            return ""
     return ""
 
 
