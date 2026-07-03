@@ -13,12 +13,8 @@ def grade(q_data: dict, question: dict, config: dict) -> dict:
     max_score = question["max_score"]
 
     try:
-        if _is_empty(q_data, gtype):
+        if _is_truly_empty(q_data, gtype):
             return _zero_score(criteria, max_score, "内容为空")
-
-        if _is_borderline(q_data, gtype) and gtype != "code":
-            if _llm_check_empty(q_data, question):
-                return _zero_score(criteria, max_score, "AI判定内容为空")
 
         tier = _detect_tier(q_data, question)
 
@@ -152,76 +148,20 @@ def _get_tier_config():
     return _tiers_cache
 
 
-def _is_empty(q_data: dict, gtype: str) -> bool:
+def _is_truly_empty(q_data: dict, gtype: str) -> bool:
+    """仅当完全无文字+无任何媒体时才判空。宁可多走LLM也不错杀。"""
     if gtype == "code":
-        has_file = bool(q_data.get("excel_path") or q_data.get("has_excel_file"))
-        return not has_file and not q_data.get("has_screenshot")
-    # 各题型关键内容字段
-    key_fields = {
-        "text": ["prompt_text", "result_text"],
-        "vision": ["prompt_text", "image_prompt", "video_prompt"],
-        "hybrid": ["persona_text"],
-    }
-    fields = key_fields.get(gtype, ["prompt_text", "result_text"])
-    key_text = "".join(str(q_data.get(k, "")) for k in fields)
-    # vision: 有生成图就不算空
-    if gtype == "vision":
-        has_media = bool(q_data.get("generated_images") or q_data.get("reference_image"))
-        return len(key_text.strip()) < 15 and not has_media
-    # hybrid: 有 bot_link 或 persona_text > 30 就不算空
-    if gtype == "hybrid":
-        has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
-        return len(key_text.strip()) < 30 and not has_link
-    # text: 主要文本 > 15 字
-    return len(key_text.strip()) < 15
-
-
-def _is_borderline(q_data: dict, gtype: str) -> bool:
-    """内容处于边界——规则已判定非空，但用LLM二次确认"""
-    if gtype == "code":
-        return False
-    if gtype == "hybrid":
-        persona = str(q_data.get("persona_text", "")).strip()
-        has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
-        # persona < 80字 且 无链接 → 边界
-        return len(persona) < 80 and not has_link
-    if gtype == "vision":
-        prompt_text = str(q_data.get("prompt_text", "")).strip()
-        has_images = bool(q_data.get("generated_images") or q_data.get("reference_image"))
-        return len(prompt_text) < 30 and not has_images
-    return False
-
-
-def _llm_check_empty(q_data: dict, question: dict) -> bool:
-    """LLM判断提交是否实质为空。返回 True=空, False=有内容。失败时返回规则判断结果。"""
-    content_parts = []
-    for key, label in [("prompt_text", "提示词"), ("persona_text", "人设/逻辑"),
-                        ("result_text", "结果"), ("video_prompt", "视频提示词")]:
-        v = q_data.get(key, "")
-        if isinstance(v, str) and v.strip():
-            content_parts.append(f"{label}: {v.strip()[:200]}")
-    if q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")):
-        content_parts.append(f"链接: {q_data['bot_link']}")
-    if q_data.get("has_video"):
-        content_parts.append("有视频文件")
-    if q_data.get("has_screenshot"):
-        content_parts.append("有截图")
-    content = "\n".join(content_parts) if content_parts else "（无内容）"
-    # 先做规则兜底：无任何实质内容直接判空
-    if not content_parts:
-        return True
-    prompt = (
-        f"题目：{question.get('name', '')}\n"
-        f"学生提交：\n{content[:800]}\n\n"
-        "这个学生是否实质性地完成了这道题？只回答一个字：是 或 否"
+        return not (q_data.get("excel_path") or q_data.get("has_excel_file") or q_data.get("has_screenshot"))
+    all_text = _collect_text(q_data, gtype)
+    has_media = (
+        q_data.get("has_screenshot") or
+        q_data.get("has_video") or
+        q_data.get("generated_images") or
+        q_data.get("reference_image") or
+        q_data.get("has_excel_file") or
+        bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
     )
-    try:
-        result = llm.grade_with_text(prompt, 0)
-        ans = result.get("raw_response", "").strip()
-        return "是" in ans and "否" not in ans
-    except Exception:
-        # LLM不可用时用规则兜底
-        return not content_parts
+    return len(all_text.strip()) < 5 and not has_media
 
 
 def _zero_score(criteria: list, max_score: int, msg: str) -> dict:

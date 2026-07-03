@@ -348,13 +348,13 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
 
     # 列宽
     for col in range(1, total_cols + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 13
-    ws.column_dimensions['A'].width = 8
-    ws.column_dimensions['B'].width = 18
-    ws.column_dimensions['C'].width = 12
-    ws2.column_dimensions['A'].width = 20
+        ws.column_dimensions[get_column_letter(col)].width = 11
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 10
+    ws2.column_dimensions['A'].width = 18
     for col in range(2, len(questions) + 3):
-        ws2.column_dimensions[get_column_letter(col)].width = 14
+        ws2.column_dimensions[get_column_letter(col)].width = 12
 
     os.makedirs(output_dir, exist_ok=True)
     filepath = os.path.join(output_dir, f"评分汇总_{class_name}.xlsx")
