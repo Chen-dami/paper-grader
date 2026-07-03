@@ -290,12 +290,29 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         if pt and os.path.isdir(pt):
             shutil.rmtree(pt, ignore_errors=True)
 
+        q_scores = {}
+        for q in rubric["questions"]:
+            q_scores[f"q{q['id']}_score"] = all_scores.get(q["id"], {}).get("总分", 0)
+        criteria = {}
+        for q in rubric["questions"]:
+            qid = q["id"]
+            qs = all_scores.get(qid, {})
+            c_scores = {}
+            for c in q["criteria"]:
+                key = f"得分_{c['id']}_{c['name']}"
+                c_scores[c["id"]] = {"name": c["name"], "score": qs.get(key, 0), "max": c["max"]}
+            criteria[str(qid)] = c_scores
         results.append({
-            "学号": student.get("学号", "?"),
-            "姓名": student.get("姓名", "?"),
+            "student_id": student.get("学号", "?"),
+            "student_name": student.get("姓名", "?"),
+            "student_id_alias": student.get("学号", "?"),
+            **q_scores,
             **{q["name"]: all_scores.get(q["id"], {}).get("总分", 0) for q in rubric["questions"]},
+            "total_score": total_score,
             "总分": total_score,
             "文件名": fn,
+            "_criteria": criteria,
+            "class_name": class_name,
         })
         bar.progress((i + 1) / total)
 
@@ -319,10 +336,12 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     if results:
         summary_data = []
         for r in results:
-            item = {"student_id": r["学号"], "student_name": r["姓名"],
-                    "class_name": class_name, "total_score": r["总分"]}
+            item = {"student_id": r.get("student_id", r.get("学号", "")),
+                    "student_name": r.get("student_name", r.get("姓名", "")),
+                    "class_name": class_name, "total_score": r.get("total_score", r.get("总分", 0)),
+                    "_criteria": r.get("_criteria", {})}
             for q in rubric["questions"]:
-                item[f"q{q['id']}_score"] = r.get(q["name"], 0)
+                item[f"q{q['id']}_score"] = r.get(q["name"], r.get(f"q{q['id']}_score", 0))
             summary_data.append(item)
         class_summary_report(summary_data, rubric, out_dir, safe_class)
 

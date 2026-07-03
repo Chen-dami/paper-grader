@@ -302,6 +302,56 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
         for c in range(1, 3):
             ws2.cell(row=7 + bi, column=c).border = THIN_BORDER
 
+    # ===== Sheet 3: 得分明细 =====
+    has_detail = any(r.get("_criteria") for r in results)
+    if has_detail:
+        ws3 = wb.create_sheet("得分明细")
+        detail_headers = ["序号", "学号", "姓名", "题号", "题目", "得分项", "得分", "满分", "得分率"]
+        for col, h in enumerate(detail_headers, 1):
+            c = ws3.cell(row=1, column=col, value=h)
+            c.font = HEADER_FONT; c.fill = HEADER_FILL; c.border = THIN_BORDER; c.alignment = CENTER
+
+        drow = 2
+        for i, r in enumerate(results):
+            sid = r.get("student_id", "")
+            sname = r.get("student_name", "")
+            criteria = r.get("_criteria", {})
+            if not criteria:
+                continue
+            for q in questions:
+                qid = str(q["id"])
+                q_criteria = criteria.get(qid, {})
+                for cid, cd in q_criteria.items():
+                    ws3.cell(row=drow, column=1, value=i + 1).font = NORMAL_FONT
+                    ws3.cell(row=drow, column=2, value=sid).font = NORMAL_FONT
+                    ws3.cell(row=drow, column=3, value=sname).font = NORMAL_FONT
+                    ws3.cell(row=drow, column=4, value=f"Q{qid}").font = NORMAL_FONT
+                    ws3.cell(row=drow, column=5, value=q["name"]).font = NORMAL_FONT
+                    ws3.cell(row=drow, column=6, value=cd.get("name", "")).font = NORMAL_FONT
+                    score = cd.get("score", 0)
+                    max_s = cd.get("max", 1)
+                    ws3.cell(row=drow, column=7, value=score).font = NORMAL_FONT
+                    ws3.cell(row=drow, column=8, value=max_s).font = NORMAL_FONT
+                    rate = score / max_s if max_s > 0 else 0
+                    ws3.cell(row=drow, column=9, value=f"{rate:.0%}").font = NORMAL_FONT
+                    sc = ws3.cell(row=drow, column=7)
+                    if max_s > 0:
+                        if rate >= 0.8:
+                            sc.fill = PASS_FILL
+                        elif rate < 0.5:
+                            sc.fill = FAIL_FILL
+                    for col in range(1, 10):
+                        ws3.cell(row=drow, column=col).border = THIN_BORDER
+                    ws3.cell(row=drow, column=1).alignment = CENTER
+                    ws3.cell(row=drow, column=4).alignment = CENTER
+                    ws3.cell(row=drow, column=7).alignment = CENTER
+                    ws3.cell(row=drow, column=8).alignment = CENTER
+                    ws3.cell(row=drow, column=9).alignment = CENTER
+                    drow += 1
+
+        for col, w in enumerate([6, 18, 12, 6, 16, 22, 8, 8, 8], 1):
+            ws3.column_dimensions[get_column_letter(col)].width = w
+
     # 列宽
     for col in range(1, col_count + 1):
         ws.column_dimensions[get_column_letter(col)].width = 13

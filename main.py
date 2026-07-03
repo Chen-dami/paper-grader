@@ -85,12 +85,23 @@ def grade_one(paper_path: str, rubric: dict, config: dict, out_dir: str) -> dict
     if paper_tmp and os.path.isdir(paper_tmp):
         shutil.rmtree(paper_tmp, ignore_errors=True)
 
+    criteria_scores = {}
+    for q in rubric["questions"]:
+        qid = q["id"]
+        qs = all_scores.get(qid, {})
+        c_scores = {}
+        for c in q["criteria"]:
+            key = f"得分_{c['id']}_{c['name']}"
+            c_scores[c["id"]] = {"name": c["name"], "score": qs.get(key, 0), "max": c["max"]}
+        criteria_scores[str(qid)] = c_scores
+
     result = {
         "student_id": student.get("学号", "?"),
         "student_name": student.get("姓名", "?"),
         "class_name": student.get("班级", ""),
         "total_score": total,
         "tokens": (tokens_in, tokens_out),
+        "_criteria": criteria_scores,
     }
     for q in rubric["questions"]:
         qid = q["id"]
