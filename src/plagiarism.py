@@ -380,8 +380,15 @@ def _generate_report(pairs: list, meta_list: list, output_path: str):
     for col in range(1, len(mheaders) + 1):
         ws2.column_dimensions[chr(64 + min(col, 26))].width = 20
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    wb.save(output_path)
+    d = os.path.dirname(output_path)
+    if d: os.makedirs(d, exist_ok=True)
+    try:
+        wb.save(output_path)
+    except PermissionError:
+        from datetime import datetime
+        base, ext = os.path.splitext(output_path)
+        output_path = f"{base}_{datetime.now().strftime('%H%M%S')}{ext}"
+        wb.save(output_path)
     print(f"  查重报告: {output_path}")
 
 
