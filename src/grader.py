@@ -58,12 +58,17 @@ def _detect_tier(q_data: dict, question: dict) -> str:
     if len(all_text.strip()) <= threshold:
         return "敷衍"
 
-    # 3. 跑题
+    # 3. 跑题（vision类有媒体素材则跳过关键词检查）
     if keywords:
-        matched = [kw for kw in keywords if kw in all_text]
-        need = 2 if len(keywords) >= 2 else 1
-        if len(matched) < need:
-            return "跑题"
+        has_media = bool(q_data.get("generated_images") or q_data.get("reference_image") or
+                         q_data.get("has_video") or q_data.get("generated_image"))
+        if gtype == "vision" and has_media:
+            pass  # 有图/视频 = 不跑题
+        else:
+            matched = [kw for kw in keywords if kw in all_text]
+            need = 2 if len(keywords) >= 2 else 1
+            if len(matched) < need:
+                return "跑题"
 
     # 4. 素材检查（按配置顺序）
     has_video = bool(q_data.get("has_video") and q_data.get("video_path"))
