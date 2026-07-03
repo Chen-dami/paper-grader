@@ -358,7 +358,12 @@ def class_summary_report(results: list, rubric: dict, output_dir: str,
 
     os.makedirs(output_dir, exist_ok=True)
     filepath = os.path.join(output_dir, f"评分汇总_{class_name}.xlsx")
-    wb.save(filepath)
+    try:
+        wb.save(filepath)
+    except PermissionError:
+        ts = datetime.now().strftime("%H%M%S")
+        filepath = os.path.join(output_dir, f"评分汇总_{class_name}_{ts}.xlsx")
+        wb.save(filepath)
     return filepath
 
 
