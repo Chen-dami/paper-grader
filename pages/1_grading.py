@@ -21,6 +21,31 @@ if not st.session_state.get("authenticated", False):
 
 st.title("阅卷")
 
+# 持久化偏好
+import json as _json
+_PREFS_FILE = os.path.join("data", "prefs.json")
+
+
+def _load_prefs():
+    try:
+        with open(_PREFS_FILE, "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_prefs(d):
+    os.makedirs("data", exist_ok=True)
+    with open(_PREFS_FILE, "w", encoding="utf-8") as f:
+        _json.dump(d, f, ensure_ascii=False)
+
+
+_prefs = _load_prefs()
+if "papers_root" not in st.session_state:
+    st.session_state.papers_root = _prefs.get("papers_root", "data/papers")
+if "grading_mode" not in st.session_state:
+    st.session_state.grading_mode = _prefs.get("grading_mode", "relaxed")
+
 # ---- 评分标准 ----
 st.subheader("第一步：选择评分标准")
 
@@ -99,6 +124,9 @@ with tab1:
         key="papers_root_input"
     )
     st.session_state.papers_root = papers_root
+    if papers_root != _prefs.get("papers_root", ""):
+        _prefs["papers_root"] = papers_root
+        _save_prefs(_prefs)
 
     if st.button("扫描班级", type="primary", use_container_width=True):
         st.session_state.scan_done = True
@@ -325,6 +353,21 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
             if os.path.isdir(imgs) or os.path.isdir(embs):
                 shutil.rmtree(dp, ignore_errors=True)
 
+    # 核查提醒：有内容但某评分项为0的标记
+    review_items = []
+    for r in results:
+        criteria = r.get("_criteria", {})
+        for qid_str, crits in criteria.items():
+            for cid, cd in crits.items():
+                if cd.get("score", 0) == 0 and cd.get("max", 0) > 0:
+                    review_items.append(f"{r.get('student_name','?')} Q{qid_str} {cd['name']}: 0/{cd['max']}分")
+    if review_items:
+        with st.expander(f"🔍 核查提醒：{len(review_items)} 个评分项为0分（可能有遗漏，请人工复核）", expanded=len(review_items) <= 10):
+            for item in review_items[:50]:
+                st.caption(item)
+            if len(review_items) > 50:
+                st.caption(f"... 还有 {len(review_items) - 50} 项")
+
     if failed:
         stat.text(f"阅卷完成！成功 {len(results)}/{total} 份，失败 {len(failed)} 份")
         with st.expander(f"⚠ {len(failed)} 份提取失败详情"):
@@ -410,14 +453,20 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         with dl3:
             plag_files = st.session_state.get("_plag_files", [])
             if not plag_files:
-                plag_files = glob.glob(os.path.join(out_dir, "查重报告_*.xlsx"))
-            if len(plag_files) == 1 and os.path.exists(plag_files[0]):
-                with open(plag_files[0], "rb") as f:
-                    st.download_button("查重报告", f.read(), file_name=os.path.basename(plag_files[0]))
-            elif len(plag_files) > 1:
-                zb2 = io.BytesIO()
-                with zipfile.ZipFile(zb2, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for pf in plag_files:
-                        if os.path.exists(pf):
-                            zf.write(pf, os.path.basename(pf))
-                st.download_button("查重报告(ZIP)", zb2.getvalue(), file_name=f"查重报告_{safe_class}.zip")
+                plag_files = glob.glob(os.path.join(out_dir, "查重报告*.xlsx"))
+                # 也搜索各班目录
+                for cname in st.session_state.get("_class_names_list", []):
+                    plag_files.extend(glob.glob(os.path.join("output", cname, "查重报告.xlsx")))
+            if plag_files:
+                if len(plag_files) == 1:
+                    with open(plag_files[0], "rb") as f:
+                        st.download_button("查重报告", f.read(), file_name=os.path.basename(plag_files[0]))
+                else:
+                    zb2 = io.BytesIO()
+                    with zipfile.ZipFile(zb2, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for pf in plag_files:
+                            if os.path.exists(pf):
+                                zf.write(pf, os.path.basename(pf))
+                    st.download_button("查重报告(ZIP)", zb2.getvalue(), file_name=f"查重报告_{safe_class}.zip")
+            else:
+                st.caption("查重报告：未生成（需≥2份试卷）")
