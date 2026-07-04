@@ -182,12 +182,11 @@ with tab1:
             st.warning("该目录下未找到任何班级（需包含 .docx 试卷）")
         else:
             # 初始化勾选状态
-            ck_key = f"class_ck_{papers_root}"
-            if ck_key not in st.session_state:
-                st.session_state[ck_key] = {}
+            # 初始化：用 checkbox key 直接存状态
             for name, is_class, total, _, _ in class_entries:
-                if name not in st.session_state[ck_key]:
-                    st.session_state[ck_key][name] = is_class  # 符合命名规则的默认勾选
+                ck_name = f"ck_{name}"
+                if ck_name not in st.session_state:
+                    st.session_state[ck_name] = is_class
 
             st.caption(f"检测到 {len(class_entries)} 个候选班级：")
 
@@ -196,28 +195,25 @@ with tab1:
             with cc1:
                 if st.button("全选", key="sel_all"):
                     for name, _, _, _, _ in class_entries:
-                        st.session_state[ck_key][name] = True
+                        st.session_state[f"ck_{name}"] = True
                     st.rerun()
             with cc2:
                 if st.button("全不选", key="sel_none"):
                     for name, _, _, _, _ in class_entries:
-                        st.session_state[ck_key][name] = False
+                        st.session_state[f"ck_{name}"] = False
                     st.rerun()
             with cc3:
                 if st.button("反选", key="sel_inv"):
                     for name, _, _, _, _ in class_entries:
-                        st.session_state[ck_key][name] = not st.session_state[ck_key].get(name, False)
+                        st.session_state[f"ck_{name}"] = not st.session_state.get(f"ck_{name}", False)
                     st.rerun()
 
             selected_classes = []
             for name, is_class, total, sfolders, ldocx in class_entries:
-                tag = "🎓" if is_class else "📂"
                 checked = st.checkbox(
-                    f"{tag} {name}（{total}份试卷）",
-                    value=st.session_state[ck_key].get(name, False),
+                    f"{name}（{total}份试卷）",
                     key=f"ck_{name}"
                 )
-                st.session_state[ck_key][name] = checked
                 if checked:
                     selected_classes.append((name, sfolders, ldocx))
 
