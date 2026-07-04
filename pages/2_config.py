@@ -7,6 +7,7 @@ from copy import deepcopy
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.ui_style import inject; inject()
+from src import model_router as router
 
 if not st.session_state.get("authenticated", False):
     st.warning("请先在首页登录")
@@ -35,7 +36,7 @@ if "grading_mode" not in st.session_state:
 # ============================================================
 #  Tab 1: 评分模式 & 档位
 # ============================================================
-tab1, tab2, tab3 = st.tabs(["评分模式 & 档位", "题目 & 权重", "数据检查"])
+tab1, tab2, tab3, tab4 = st.tabs(["评分模式 & 档位", "题目 & 权重", "数据检查", "模型路由"])
 
 mode_names = {"relaxed": "宽松", "normal": "标准", "strict": "严格", "custom": "自定义"}
 custom_presets = config.get("custom_presets") or {}
@@ -216,8 +217,8 @@ with tab2:
                 with c1:
                     q["name"] = st.text_input("名称", value=q.get("name", ""), key=f"qn_{qi}")
                 with c2:
-                    gtypes = ["text", "vision", "code", "hybrid"]
-                    gn = {"text": "文字生成", "vision": "图像/视频", "code": "纯代码", "hybrid": "智能体"}
+                    gtypes = ["multiple_choice", "true_false", "fill_blank", "short_answer", "text", "vision", "code", "hybrid"]
+                    gn = {"multiple_choice": "选择题", "true_false": "判断题", "fill_blank": "填空题", "short_answer": "简答题", "text": "文字生成", "vision": "图像/视频", "code": "纯代码", "hybrid": "智能体"}
                     cur = q.get("grading_type", "text")
                     gi = gtypes.index(cur) if cur in gtypes else 0
                     q["grading_type"] = st.selectbox("评分类型", gtypes, index=gi,
@@ -230,6 +231,42 @@ with tab2:
                                      value=", ".join(q.get("topic_keywords", [])),
                                      key=f"qkws_{qi}", placeholder="如：茶艺, 茶文化, 茶道")
                 q["topic_keywords"] = [k.strip() for k in kws.split(",") if k.strip()]
+
+            # 客观题配置
+            gtype = q.get("grading_type", "text")
+            if gtype in ("multiple_choice", "true_false"):
+                ak = q.get("answer_key") or {}
+                st.caption("答案设置")
+                ac1, ac2 = st.columns(2)
+                with ac1:
+                    ak["正确答案"] = st.text_input("正确答案", value=ak.get("正确答案", ""),
+                                                  key=f"ans_{qi}", placeholder="A / B / C / D / ABCD / 对 / 错")
+                with ac2:
+                    ak["分值"] = st.number_input("分值", value=int(ak.get("分值", q.get("max_score", 5))),
+                                                min_value=1, max_value=q.get("max_score", 20), key=f"ans_s_{qi}")
+                q["answer_key"] = ak
+            elif gtype == "fill_blank":
+                import json as _j
+                ak = q.get("answer_key") or {}
+                st.caption("填空答案（JSON格式）")
+                fb = st.text_area("答案", value=_j.dumps(ak.get("答案", {}), ensure_ascii=False, indent=2),
+                                 key=f"fb_{qi}", height=100, placeholder='{"1": "人工智能", "2": ["AI","人工智能"]}')
+                try:
+                    q["answer_key"] = {"答案": _j.loads(fb)}
+                except:
+                    st.caption("格式错误")
+            elif gtype == "short_answer":
+                kp = q.get("key_points") or []
+                st.caption("知识点踩分点（每行：关键词=分值）")
+                kt = st.text_area("知识点", value=chr(10).join(f"{p.get('keyword','')}={p.get('score',0)}" for p in kp),
+                                 key=f"kp_{qi}", height=80, placeholder="去重=3\\n空值填充=3")
+                new_kp = []
+                for line in kt.strip().split(chr(10)):
+                    if "=" in line:
+                        kw, sc = line.split("=", 1)
+                        new_kp.append({"keyword": kw.strip(), "score": int(sc.strip())})
+                if new_kp:
+                    q["key_points"] = new_kp
 
             st.caption("评分项")
             criteria = q.get("criteria", [])
@@ -345,4 +382,68 @@ with tab3:
                 json.dump(rubric, f, ensure_ascii=False, indent=2)
             st.session_state.rubric = rubric
             st.success("已保存")
-            st.toast("✅ 检查规则已保存", icon="✅")
+            st.toast("检查规则已保存", icon="✅")
+
+# ============================================================
+#  Tab 4: 模型路由
+# ============================================================
+with tab4:
+    st.subheader("多模型路由配置")
+    st.caption("按任务类型分发模型：文本题用便宜模型，视觉题用视觉模型。修改后即时生效。")
+
+    rc = config.get("model_router") or {}
+    if not rc:
+        rc = {}
+        config["model_router"] = rc
+
+    model_list = list(router.MODEL_REGISTRY.keys())
+
+    def ms(label, key, default):
+        val = rc.get(key, default)
+        idx = model_list.index(val) if val in model_list else 0
+        desc = router.MODEL_REGISTRY.get(val, {}).get('description', '')[:35]
+        return st.selectbox(f"{label} [{val}]", model_list, index=idx,
+                           format_func=lambda x: f"{x}", key=f"mr_{key}")
+
+    st.markdown("**任务分配**")
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        rc["text_model"] = ms("文本题模型", "text_model", "deepseek-chat")
+        rc["vision_model"] = ms("视觉题模型", "vision_model", "qwen-vl-max")
+        rc["tier_model"] = ms("档位判定模型", "tier_model", "gpt-4o-mini")
+    with mc2:
+        rc["reasoning_model"] = ms("深度推理模型", "reasoning_model", "deepseek-reasoner")
+        rc["high_value_model"] = ms("大分值模型", "high_value_model", "gpt-4o")
+        rc["high_value_threshold"] = st.number_input("大分值阈值(分)", value=int(rc.get("high_value_threshold", 20)),
+                                                      min_value=5, max_value=50, key="mr_thresh")
+
+    st.divider()
+    st.markdown("**Fallback 备用链**")
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        vf = st.text_input("视觉 Fallback", value=", ".join(rc.get("vision_fallback", ["gpt-4o", "qwen-vl-max", "glm-4v"])), key="mr_vf")
+        rc["vision_fallback"] = [m.strip() for m in vf.split(",") if m.strip()]
+    with fc2:
+        tf = st.text_input("文本 Fallback", value=", ".join(rc.get("text_fallback", ["deepseek-chat"])), key="mr_tf")
+        rc["text_fallback"] = [m.strip() for m in tf.split(",") if m.strip()]
+
+    st.divider()
+    st.markdown("**已注册模型**")
+    md = []
+    for name, info in router.MODEL_REGISTRY.items():
+        has_key = bool(__import__('os').environ.get(info["env_key"], ""))
+        md.append({
+            "模型": name,
+            "视觉": "Y" if info["vision"] else "N",
+            "特长": info.get("strength", "-"),
+            "费用": f"{info['cost_per_1M_input']}/{info['cost_per_1M_output']}",
+            "状态": "可用" if has_key else "需配Key",
+            "环境变量": info["env_key"],
+        })
+    import pandas as pd
+    st.dataframe(pd.DataFrame(md), use_container_width=True, hide_index=True)
+
+    if st.button("保存路由配置", type="primary"):
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        st.success("已保存，下次评分生效")
