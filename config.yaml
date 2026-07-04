@@ -127,3 +127,18 @@ agent_test:
   enabled: false
   timeout: 15
   headless: true
+
+# ===== 多模型路由 =====
+model_router:
+  text_model: deepseek-chat        # 纯文本题（便宜优先）
+  vision_model: gpt-4o-mini        # 视觉题（能力优先）
+  reasoning_model: deepseek-reasoner  # 深度推理
+  tier_model: gpt-4o-mini          # 档位判定（轻量便宜）
+  vision_fallback:                  # 视觉模型 fallback 链
+    - gpt-4o
+    - qwen-vl-max
+    - glm-4v
+  text_fallback:
+    - deepseek-chat
+  high_value_threshold: 20          # 大分值题阈值（分）
+  high_value_model: gpt-4o          # 大分值用高级模型
