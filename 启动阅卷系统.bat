@@ -1,76 +1,66 @@
 @echo off
-chcp 65001 >nul
-title AI阅卷系统
+title Grading System
 cd /d "%~dp0"
 
 echo.
 echo   ========================================
-echo         AI智能阅卷系统  v1.1
+echo         Grading System
 echo   ========================================
 echo.
 
-:: 检查虚拟环境
-if not exist ".venv\Scripts\python.exe" (
-    echo   [提示] 首次运行，请先双击 "安装环境.bat"
-    echo.
-    pause
-    exit /b 1
-)
-
-set PYTHON=.venv\Scripts\python.exe
-
-:: 检查依赖
-%PYTHON% -c "import streamlit" >nul 2>&1
-if errorlevel 1 (
-    echo   [提示] 依赖未安装，请先双击 "安装环境.bat"
-    echo.
-    pause
-    exit /b 1
-)
-
-:: 检查 API Key
-set HAS_KEY=0
-%PYTHON% -c "import os; exit(0 if os.environ.get('DEEPSEEK_KEY','') else 1)" >nul 2>&1
-if %errorlevel% neq 0 set HAS_KEY=1
-
-if %HAS_KEY% equ 1 (
-    echo   API Key 未配置
-    echo.
-    echo   支持的环境变量：DEEPSEEK_KEY / OPENAI_API_KEY / DASHSCOPE_API_KEY
-    echo   至少配置一个模型 API Key 才能评分
-    echo.
-    echo   设置方法：
-    echo     1. 按 Win+R，输入 sysdm.cpl，回车
-    echo     2. 高级 → 环境变量 → 新建用户变量
-    echo     3. 变量名：DEEPSEEK_KEY  变量值：sk-xxxxx
-    echo.
-    set /p "KEY_INPUT=或者现在输入 DeepSeek API Key（仅本次生效）: "
-    if not "%KEY_INPUT%"=="" (
-        set DEEPSEEK_KEY=%KEY_INPUT%
-        echo   Key 已临时设置
-    )
-    echo.
-)
-
-:: 清理旧进程
-echo   [1/2] 检查端口...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8501" ^| findstr "LISTENING" 2^>nul') do (
+REM Kill old process on port 8501
+echo   [1/3] Cleaning old process...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8501" ^| findstr "LISTENING"') do (
     taskkill /F /PID %%a >nul 2>&1
 )
-echo   OK
-
-:: 启动
-echo   [2/2] 启动服务...
+echo   Done
 echo.
+
+REM Find Python: 1) system PATH  2) bundled .venv  3) common locations
+echo   [2/3] Finding Python...
+set PYTHON=python
+
+REM If .venv python exists AND works, use it
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" --version >nul 2>&1
+    if not errorlevel 1 (
+        set PYTHON=.venv\Scripts\python.exe
+        echo   Using bundled .venv
+    )
+)
+
+REM Verify it works
+%PYTHON% --version >nul 2>&1
+if errorlevel 1 (
+    echo   Python not found in PATH or .venv
+    echo   Please install Python 3.8+ and add it to PATH
+    echo   Then run: pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+echo   OK  [%PYTHON%]
+echo.
+
+REM Install deps if missing
+%PYTHON% -c "import streamlit" >nul 2>&1
+if errorlevel 1 (
+    echo   Installing dependencies...
+    %PYTHON% -m pip install -r requirements.txt -q
+    if errorlevel 1 (
+        echo   Failed to install. Try manually:
+        echo     %PYTHON% -m pip install -r requirements.txt
+        pause
+        exit /b 1
+    )
+)
+
+REM Start
+echo   [3/3] Starting http://localhost:8501
 echo   ========================================
-echo     浏览器即将打开 http://localhost:8501
-echo     按 Ctrl+C 或关闭此窗口停止服务
-echo   ========================================
 echo.
 
-start "" http://localhost:8501
-%PYTHON% -m streamlit run app.py --server.port 8501 --server.headless true
+%PYTHON% -m streamlit run app.py --server.port 8501
 
 echo.
-echo   服务已停止。
+echo   Server stopped.
 pause
