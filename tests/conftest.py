@@ -167,6 +167,7 @@ def sample_config():
             "max_tokens": 2048,
             "temperature": 0.3,
         },
+        "vision_strategy": "paid_vision",  # 默认策略
         "grading": {
             "mode": "normal",
             "pass_line": 60,

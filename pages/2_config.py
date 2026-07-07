@@ -593,49 +593,73 @@ with tab4:
                           format_func=lambda i: model_labels[i], key=f"mr_{key}")
 
     st.markdown("**手动配置**")
-    mc1, mc2 = st.columns(2)
-    with mc1:
-        idx = _smart_select("📝 文本题", "text_model", "deepseek-chat")
-        rc["text_model"] = model_names[idx]
-        idx2 = _smart_select("👁️ 视觉题", "vision_model", "qwen-vl-plus" if _has_qwen else "glm-4v-flash")
-        rc["vision_model"] = model_names[idx2]
-        idx3 = _smart_select("🔍 档位判定", "tier_model", "deepseek-chat")
-        rc["tier_model"] = model_names[idx3]
-    with mc2:
-        idx4 = _smart_select("💎 大分值题", "high_value_model", "qwen-vl-max" if _has_qwen else "glm-4v-flash")
-        rc["high_value_model"] = model_names[idx4]
-        rc["high_value_threshold"] = st.number_input("大分值阈值(分)", value=int(rc.get("high_value_threshold", 25)),
-                                                      min_value=5, max_value=50, key="mr_thresh")
 
-    # 当前选择效果说明
+    # ---- 视觉识别策略（主控，自动联动底层模型） ----
+    st.caption("选择策略后自动配置底层模型。付费最准，纯文字最省钱。")
+    strategy_opts = {
+        "paid_vision": "付费视觉（推荐）", "free_vision": "免费视觉", "text_only": "纯文字",
+    }
+    strategy_details = {
+        "paid_vision": ("qwen-vl-plus", "qwen-vl-max", "5图全面评估"),
+        "free_vision":  ("glm-4v-flash", "glm-4v-flash", "1图零费用"),
+        "text_only":    ("deepseek-chat", "deepseek-chat", "不看图靠文字"),
+    }
+    cur_strategy = rc.get("vision_strategy", "paid_vision")
+    strategy_idx = list(strategy_opts.keys()).index(cur_strategy) if cur_strategy in strategy_opts else 0
+
+    new_strategy = st.selectbox(
+        "视觉识别策略", list(strategy_opts.keys()), index=strategy_idx,
+        format_func=lambda k: f"{strategy_opts[k]} — {strategy_details[k][2]}",
+        key="mr_strategy",
+    )
+    if new_strategy != cur_strategy or "vision_strategy" not in rc:
+        rc["vision_strategy"] = new_strategy
+        # 自动联动底层模型
+        vis_model, high_model, _ = strategy_details[new_strategy]
+        rc["vision_model"] = vis_model
+        rc["high_value_model"] = high_model
+        if new_strategy == "text_only":
+            rc["vision_fallback"] = []
+        elif new_strategy == "free_vision":
+            rc["vision_fallback"] = ["glm-4.6v-flash", "glm-4v-flash"]
+        # 自动保存（策略切换即时生效，不需要再点保存按钮）
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        st.rerun()
+
+    # ---- 高级：手动覆盖模型（折叠） ----
+    with st.expander("高级：手动覆盖模型", expanded=False):
+        st.caption("以下设置会覆盖策略的默认模型。通常不需要修改。")
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            idx = _smart_select("文本题模型", "text_model", "deepseek-chat")
+            rc["text_model"] = model_names[idx]
+            idx2 = _smart_select("视觉题模型", "vision_model", rc.get("vision_model", "qwen-vl-plus"))
+            rc["vision_model"] = model_names[idx2]
+        with mc2:
+            idx3 = _smart_select("大分值题模型", "high_value_model", rc.get("high_value_model", "qwen-vl-max"))
+            rc["high_value_model"] = model_names[idx3]
+            rc["high_value_threshold"] = st.number_input("大分值阈值(分)",
+                value=int(rc.get("high_value_threshold", 25)),
+                min_value=5, max_value=50, key="mr_thresh")
+
+        st.markdown("**Fallback 备用链**")
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            vf = st.text_input("视觉 Fallback", value=", ".join(rc.get("vision_fallback", [])), key="mr_vf")
+            rc["vision_fallback"] = [m.strip() for m in vf.split(",") if m.strip()]
+        with fc2:
+            tf = st.text_input("文本 Fallback", value=", ".join(rc.get("text_fallback", ["deepseek-chat"])), key="mr_tf")
+            rc["text_fallback"] = [m.strip() for m in tf.split(",") if m.strip()]
+
+    # 当前生效方案
     cur_vis = rc.get("vision_model", "")
     vi = router.MODEL_REGISTRY.get(cur_vis, {})
     img_lim = vi.get("image_limit", 0)
-    tier = img_lim if vi.get("vision") else 0
-
-    tier_desc = {
-        0: ("📝 纯文本模式", "无视觉模型，靠文字描述判断。视觉相关项以提示词为准。"),
-        1: ("🆓 免费视觉(1图)→DeepSeek", "视觉模型描述1张图，DeepSeek评分。视频题看1帧，无法评估动态/配音。"),
-        5: ("💰 付费视觉(5图)→DeepSeek", "视觉模型描述3-5张图，DeepSeek评分。视频题看3帧+生成图。"),
-        10: ("💰 付费视觉(10图)→DeepSeek", "视觉模型描述多图，DeepSeek评分。全面评估，所有素材都看到。"),
-    }
-    desc_key = img_lim if img_lim in (0, 1, 5, 10) else (5 if img_lim >= 5 else 1)
-    _title, _desc = tier_desc.get(desc_key, tier_desc[0])
-
+    free_tag = "免费" if vi.get("cost_per_1M_input", 1) == 0 else "付费"
+    tier_tag = f"{free_tag}视觉({img_lim}图)" if vi.get("vision") else "纯文字"
     with st.container(border=True):
-        st.markdown(f"**当前方案：{_title}**")
-        st.caption(_desc)
-
-    st.divider()
-    st.markdown("**Fallback 备用链**")
-    st.caption("主模型失败时依次尝试。可输入逗号分隔的模型名。")
-    fc1, fc2 = st.columns(2)
-    with fc1:
-        vf = st.text_input("视觉 Fallback", value=", ".join(rc.get("vision_fallback", ["qwen-vl-max", "glm-4v", "glm-4v-flash"])), key="mr_vf")
-        rc["vision_fallback"] = [m.strip() for m in vf.split(",") if m.strip()]
-    with fc2:
-        tf = st.text_input("文本 Fallback", value=", ".join(rc.get("text_fallback", ["deepseek-chat"])), key="mr_tf")
-        rc["text_fallback"] = [m.strip() for m in tf.split(",") if m.strip()]
+        st.markdown(f"**当前方案：{tier_tag}** | 视觉模型: {cur_vis} | 文本: {rc.get('text_model','?')} | 策略: {rc.get('vision_strategy','?')}")
 
     if st.button("💾 保存路由配置", type="primary"):
         with open(config_path, "w", encoding="utf-8") as f:

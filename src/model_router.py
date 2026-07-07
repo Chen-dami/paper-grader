@@ -152,6 +152,8 @@ def get_router_config():
         "text_model": rc.get("text_model", "deepseek-chat"),
         # 视觉题模型（阿里云 qwen-vl-plus 5图，性价比最高）
         "vision_model": rc.get("vision_model", "qwen-vl-plus"),
+        # 视觉策略: paid_vision | free_vision | text_only
+        "vision_strategy": rc.get("vision_strategy", "paid_vision"),
         # 深度推理模型
         "reasoning_model": rc.get("reasoning_model", "deepseek-reasoner"),
         # 档位判定模型（轻量）
@@ -163,6 +165,29 @@ def get_router_config():
         "high_value_threshold": rc.get("high_value_threshold", 25),
         "high_value_model": rc.get("high_value_model", "qwen-vl-max"),
     }
+
+
+def get_vision_strategy_model(strategy: str = None) -> str:
+    """
+    根据视觉策略返回最优模型名。
+    - paid_vision: 用配置的 vision_model（默认 qwen-vl-plus 5图）
+    - free_vision: 用免费视觉模型（glm-4v-flash 1图）
+    - text_only: 返回 deepseek-chat（不会被用于视觉调用）
+    """
+    rc = get_router_config()
+    strategy = strategy or rc.get("vision_strategy", "paid_vision")
+
+    if strategy == "text_only":
+        return "deepseek-chat"
+    elif strategy == "free_vision":
+        # 找第一个可用的免费 1 图视觉模型
+        for name in ["glm-4v-flash", "glm-4.6v-flash"]:
+            if _model_available(name):
+                return name
+        # 回退：用配置的 vision_model
+        return rc["vision_model"]
+    else:  # paid_vision
+        return rc["vision_model"]
 
 
 # ============================================================
@@ -392,7 +417,8 @@ def _build_vision_content(prompt: str, image_paths: list) -> list:
 # ============================================================
 #  两阶段评分 Stage 1：视觉模型描述图片（省钱核心）
 # ============================================================
-def describe_images(images: list, question_name: str = "", question_score: int = 10) -> str:
+def describe_images(images: list, question_name: str = "",
+                    question_score: int = 10, force_model: str = None) -> str:
     """
     让视觉模型描述图片内容，只返回文字描述，不做评分。
 
@@ -401,6 +427,8 @@ def describe_images(images: list, question_name: str = "", question_score: int =
       Stage 2: DeepSeek文本模型 → 根据描述评分（输出token极便宜）
 
     失败时自动 fallback，全挂返回空字符串。
+
+    force_model: 强制使用指定模型（用于策略切换），None 则按配置路由
     """
     import sys as _sys
 
@@ -408,11 +436,14 @@ def describe_images(images: list, question_name: str = "", question_score: int =
         return ""
 
     rc = get_router_config()
-    model_name = rc["vision_model"]
 
-    # 大分值用高级模型
-    if question_score >= rc["high_value_threshold"]:
-        model_name = rc["high_value_model"]
+    if force_model:
+        model_name = force_model
+    else:
+        model_name = rc["vision_model"]
+        # 大分值用高级模型
+        if question_score >= rc["high_value_threshold"]:
+            model_name = rc["high_value_model"]
 
     # 检查并 fallback
     if not _model_available(model_name):
@@ -438,7 +469,11 @@ def describe_images(images: list, question_name: str = "", question_score: int =
 2. **文字信息**：图片中出现的所有文字、标题、标签
 3. **视觉质量**：配色、排版、清晰度、设计风格
 4. **技术细节**：图片尺寸、格式等可见信息
-5. **如果是视频帧**：人物服饰、背景环境、画面构图、光线"""
+5. **如果是视频帧**：人物服饰、背景环境、画面构图、光线
+6. **图片类型判断**：请明确标注每张图片的类型：
+   - 是设计作品本身（海报、图片、视频帧等）还是屏幕截图？
+   - 如果是屏幕截图，截图中包含了什么（AI工具界面、对话框、浏览器窗口等）？
+   - 如果是设计作品，作品的风格和主要内容是什么？"""
 
     content = _build_vision_content(desc_prompt, images)
     messages = [{"role": "user", "content": content}]

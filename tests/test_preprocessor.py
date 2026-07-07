@@ -351,8 +351,8 @@ class TestExtractQuestion:
         assert result["has_screenshot"] is True
 
     def test_screenshot_label_detection(self):
-        """表格含"截图"标签检测"""
-        content_tables = [[["提示词", "截图", "链接"]]]
+        """表格含"截图"标签 + 同行有学生内容 >20字 → 检测到截图"""
+        content_tables = [[["提示词", "生成结果截图", "学生写了很长的提示词描述了海报设计要求"]]]
         question = {
             "id": 1, "name": "文本生成",
             "grading_type": "text",
@@ -363,6 +363,20 @@ class TestExtractQuestion:
             video_files=[], paragraphs=[]
         )
         assert result["has_screenshot"] is True
+
+    def test_screenshot_label_only_no_content(self):
+        """表格含"截图"标签但同行无内容 → 不检测（避免模板标签误判）"""
+        content_tables = [[["提示词", "生成结果截图", ""]]]
+        question = {
+            "id": 1, "name": "文本生成",
+            "grading_type": "text",
+            "submission_labels": [],
+        }
+        result = _extract_question(
+            content_tables, question, images=[], excel_files=[],
+            video_files=[], paragraphs=[]
+        )
+        assert result["has_screenshot"] is False
 
 
 def _create_png(path, width, height):

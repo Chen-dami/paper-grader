@@ -8,9 +8,24 @@ from .video_frame_extractor import extract_frames as _extract_video_frames
 
 
 # ============================================================
+#  视觉策略检测
+# ============================================================
+def _should_use_vision(gtype: str, config: dict) -> bool:
+    """根据视觉策略 + 题目类型决定是否使用视觉模型"""
+    rc = router.get_router_config()
+    strategy = config.get("vision_strategy") or rc.get("vision_strategy", "paid_vision")
+
+    if strategy == "text_only":
+        return False  # 纯文字模式：永远不用视觉
+    # free_vision / paid_vision: vision/hybrid 类型用视觉
+    return gtype in ("vision", "hybrid")
+
+
+# ============================================================
 #  主入口
 # ============================================================
-def grade(q_data: dict, question: dict, config: dict) -> dict:
+def grade(q_data: dict, question: dict, config: dict,
+          force_no_vision: bool = False) -> dict:
     gtype = question.get("grading_type", "text")
     criteria = question["criteria"]
     max_score = question["max_score"]
@@ -26,11 +41,13 @@ def grade(q_data: dict, question: dict, config: dict) -> dict:
         if _is_truly_empty(q_data, gtype):
             return _zero_score(criteria, max_score, "内容为空")
 
-        use_vision = gtype == "vision"
+        use_vision = _should_use_vision(gtype, config) and not force_no_vision
         result = _grade_llm(q_data, question, config, use_vision)
 
         total = sum(result.get(f"得分_{c['id']}_{c['name']}", 0) for c in criteria)
         result["总分"] = min(total, max_score)
+        if force_no_vision:
+            result["_teacher_review_vision"] = True
     except Exception as e:
         result = _zero_score(criteria, max_score, f"评分异常: {e}")
     return result
@@ -137,12 +154,19 @@ def _is_truly_empty(q_data, gtype):
         return not (q_data.get("excel_path") or q_data.get("has_excel_file") or q_data.get("has_screenshot"))
 
     student_text = ""
-    for k in ["prompt_text", "result_text", "image_prompt", "video_prompt", "persona_text", "all_table_text"]:
+    for k in ["prompt_text", "result_text", "image_prompt", "video_prompt", "persona_text"]:
         val = q_data.get(k, "")
         if isinstance(val, str):
             student_text += val
         elif isinstance(val, list):
             student_text += " ".join(str(v) for v in val if isinstance(v, str))
+
+    # all_table_text 单独处理：可能包含模板标签而非学生内容
+    all_table = str(q_data.get("all_table_text", ""))
+    # 如果 all_table_text 主要由短行(<20字的标签行)组成 → 不算学生内容
+    long_lines = [l for l in all_table.split("\n") if len(l.strip()) > 20]
+    if long_lines:
+        student_text += "\n".join(long_lines)
 
     has_media = (
         q_data.get("generated_images") or q_data.get("reference_image") or
@@ -375,7 +399,28 @@ def _grade_llm(q_data, question, config, use_vision=False):
 
     criteria = question["criteria"]
     max_score = question["max_score"]
+    gtype = question.get("grading_type", "text")
     description = question.get("description", question.get("name", ""))
+    submission_labels = question.get("submission_labels", [])
+
+    # ---- 解析题目提交要求（从 submission_labels 提取必须材料） ----
+    required_materials = []
+    for sl in submission_labels:
+        label = sl.get("label", "")
+        sl_type = sl.get("type", "")
+        field = sl.get("field", "")
+        if sl_type in ("image",) or "截图" in label or "图" in label:
+            required_materials.append({"type": "screenshot", "label": label})
+        elif sl_type in ("video",) or "视频" in label:
+            required_materials.append({"type": "video", "label": label})
+        elif sl_type in ("file",) or "Excel" in label or "表格" in label:
+            required_materials.append({"type": "excel", "label": label})
+        elif sl_type in ("url",) or "链接" in label:
+            required_materials.append({"type": "link", "label": label})
+        elif field in ("prompt_text",) or "提示词" in label:
+            required_materials.append({"type": "prompt_text", "label": label})
+        elif field in ("persona_text",) or "人设" in label or "逻辑" in label:
+            required_materials.append({"type": "persona_text", "label": label})
 
     content_desc = _build_content_desc(q_data, question)
     rule_ctx = _build_rule_context(q_data, question)
@@ -385,72 +430,185 @@ def _grade_llm(q_data, question, config, use_vision=False):
         for i, c in enumerate(criteria)
     )
 
-    # 素材检测摘要
-    has_text = len(str(q_data.get("prompt_text", "")) + str(q_data.get("result_text", ""))) > 30
+    # ---- 材料证据检测（精确量化） ----
+    prompt_text_len = len(str(q_data.get("prompt_text", "")))
+    result_text_len = len(str(q_data.get("result_text", "")))
+    persona_text_len = len(str(q_data.get("persona_text", "")))
+    total_text_len = prompt_text_len + result_text_len + persona_text_len
+    has_substantial_text = total_text_len > 30  # 实质性文字内容
+    has_short_text = 5 <= total_text_len <= 30   # 只有简短文字
+
     has_screenshot = q_data.get("has_screenshot", False)
     has_images = bool(q_data.get("generated_images") or q_data.get("reference_image"))
+    img_count = len(q_data.get("generated_images", []))
+    if q_data.get("reference_image"):
+        img_count += 1
+
     has_video = bool(q_data.get("has_video") and q_data.get("video_path"))
     has_excel = bool(q_data.get("excel_path"))
-    has_link = bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
-    material_hints = []
-    if has_text: material_hints.append("有文字内容")
-    if has_screenshot: material_hints.append("有截图")
-    if has_images: material_hints.append("有生成图片")
-    if has_video: material_hints.append("有视频文件")
-    if has_excel: material_hints.append("有Excel文件")
-    if has_link: material_hints.append("有发布链接")
+    bot_link = q_data.get("bot_link", "")
+    has_link = bool(bot_link and "http" in str(bot_link))
+    link_reachable = q_data.get("link_reachable")  # True/False/None
 
-    # 模式引导
+    # 构建材料证据报告
+    evidence_lines = []
+    evidence_lines.append(f"- 文字内容: {'有' if has_substantial_text else ('简短' if has_short_text else '无')} (提示词{prompt_text_len}字, 结果{result_text_len}字, 人设{persona_text_len}字)")
+    if has_screenshot and not has_images:
+        evidence_lines.append(f"- 截图: 有（学生表格中标注了截图位置，截图存在但图片文件未单独提取）")
+    elif has_screenshot:
+        evidence_lines.append(f"- 截图: 有（检测到{img_count}张图片）")
+    else:
+        evidence_lines.append(f"- 截图: 无")
+    evidence_lines.append(f"- 生成图片: {'有(' + str(img_count) + '张)' if has_images else '无'}")
+    evidence_lines.append(f"- 视频文件: {'有' if has_video else '无'}")
+    evidence_lines.append(f"- Excel文件: {'有' if has_excel else '无'}")
+    if has_link:
+        lr_text = "可访问" if link_reachable is True else ("不可访问" if link_reachable is False else "未检测")
+        evidence_lines.append(f"- 发布链接: 有 ({lr_text})")
+    else:
+        evidence_lines.append(f"- 发布链接: 无")
+    evidence_report = "\n".join(evidence_lines)
+
+    # 构建要求清单（该题需要提交什么）
+    req_lines = []
+    for rm in required_materials:
+        req_lines.append(f"- {rm['label']} [{rm['type']}]")
+    requirements_text = "\n".join(req_lines) if req_lines else "- 无特殊要求"
+
+    # ---- 模式引导 ----
     mode = (config.get("grading", {}) or {}).get("mode", "relaxed")
-    mode_map = {
-        "relaxed": "【宽松模式】材料齐全且内容正确 = 满分。不要无故扣分。有明显问题才扣。",
-        "normal": "【标准模式】材料齐全 = 满分。质量有瑕疵才扣分。",
-        "strict": "【严格模式】只有确实优秀才满分。一般质量在70%-90%范围。",
+    mode_rules = {
+        "relaxed": (
+            "【宽松模式】\n"
+            "- 提交了必须材料 + 内容基本正确 → 80-100%\n"
+            "- 缺少部分材料但有替代 → 50-70%\n"
+            "- 完全没提交 → 0"
+        ),
+        "normal": (
+            "【标准模式】\n"
+            "- 所有必须材料齐全 + 质量好 → 90-100%\n"
+            "- 缺少1项材料 → 最高70%\n"
+            "- 缺少2项及以上材料 → 最高50%\n"
+            "- 无实质内容 → 0"
+        ),
+        "strict": (
+            "【严格模式】\n"
+            "- 只有确实优秀才满分\n"
+            "- 缺少任何必须材料 → 最高60%\n"
+            "- 内容敷衍 → 最高30%\n"
+            "- 材料有但质量差 → 50-70%\n"
+            "- 无实质内容 → 0"
+        ),
     }
-    mode_guidance = mode_map.get(mode, mode_map["relaxed"])
+    mode_guidance = mode_rules.get(mode, mode_rules["normal"])
 
     # ================================================================
-    #  Stage 1: 视觉模型描述图片（省钱 — 只描述不评分）
+    #  Stage 1: 视觉模型描述图片
     # ================================================================
     vision_description = ""
     vision_model_used = ""
-    if use_vision:
-        rc = router.get_router_config()
-        vision_model = rc["vision_model"]
-        strategy_images, _ = apply_strategy(vision_model, question, q_data)
+    strategy = (config.get("vision_strategy")
+                or router.get_router_config().get("vision_strategy", "paid_vision"))
 
+    vision_model = router.get_vision_strategy_model(strategy)
+    _, prompt_notes = apply_strategy(vision_model, question, q_data)
+
+    if use_vision:
+        strategy_images, _ = apply_strategy(vision_model, question, q_data)
         if strategy_images:
             vision_description = router.describe_images(
                 images=strategy_images,
                 question_name=question['name'],
                 question_score=max_score,
+                force_model=vision_model,
             )
             if vision_description:
                 vision_model_used = vision_model
             else:
-                vision_description = "（视觉模型不可用，请仅根据文字内容评分）"
+                vision_description = "（视觉模型不可用）"
 
     # ================================================================
-    #  Stage 2: DeepSeek 文本模型评分（省钱 — 纯文本便宜）
+    #  Stage 2: 构建评分 prompt（基于证据的分级评分）
     # ================================================================
+    # 策略评分规则
+    strategy_rules = ""
+    if strategy == "text_only":
+        strategy_rules = """
+【纯文字模式 — 系统无法查看图片/视频，但这不是学生的错】
+核心原则：学生提交了材料但因技术限制无法验证 → 应得满分。
+- 只要材料证据报告显示某项材料存在（截图有、链接有、文字有等）→ 对应评分项应给满分
+- 不要因为"看不到图片"而扣分 — 这是系统限制，学生已经提交了
+- 评分时假设学生提交的图片/视频/截图质量合格
+- 只在确实没有任何提交痕迹时才给低分（如：完全没有文字、没有截图标记、没有链接）
+
+具体标准：
+- 有详细的提示词/描述文字 → 说明学生认真完成了设计工作 → 视觉设计项给 90-100%
+- 有截图标记 → 截图已提交 → 提交完整性给 90-100%
+- 有链接且可访问 → 链接正常 → 满分
+- 有视频文件标记 → 视频已提交 → 视频相关项给 90-100%
+- 人设文字详细 → 智能体设计完整 → 给 90-100%
+
+只在以下情况扣分：
+- 完全没有文字内容 → 0
+- 文字明显偏题 → 按偏离程度扣分
+- 完全没有截图/链接标记 → 缺失项给0
+"""
+    elif strategy == "free_vision":
+        strategy_rules = """
+【免费视觉模式 — 仅能查看1张图片】
+- 可见的图片正常评估
+- 不可见图片：以提示词/描述文字为证据，描述详细即给满分
+- 不要因为只能看1张图而扣分 — 这是系统限制
+"""
+    else:  # paid_vision
+        strategy_rules = """
+【付费视觉模式 — 可查看多张图片，全面评估】
+- 所有可见图片正常评估
+- 如有图片格式问题不可见，以文字描述为准
+"""
+    if gtype == "text":
+        strategy_rules = """
+【文本评分模式】
+- 根据文字内容质量评分
+- 截图中的文案内容看不到 → 以提示词质量为评分依据，提示词详细即给满分
+- 不要因为看不到截图中的文案而扣分
+"""
+
+    # 智能体特殊规则
+    hybrid_rules = ""
+    if gtype == "hybrid":
+        hybrid_rules = """
+【智能体/混合题特殊规则】
+- 人设/回复逻辑：检查文字质量
+  - 文字 > 100 字且结构清晰 → 90-100%
+  - 文字 30-100 字 → 60-90%
+  - 文字 < 30 字 → 0-50%
+- 知识库/截图：相信材料证据报告
+  - 截图=有 → 截图已提交，给 90-100%
+  - 截图=无 → 该项给 0
+- 功能完善性：根据文字描述判断
+  - 有功能介绍文字 → 80-100%
+  - 无描述 → 0-30%
+- 发布链接：根据材料证据判断
+  - 链接有且可访问 → 90-100%
+  - 链接有但不可访问 → 50-70%
+  - 无链接 → 0
+"""
+
+    # 构建 vision_section
     vision_section = ""
     if vision_description:
         vision_section = f"""
 【图片/视频帧描述（由视觉模型 {vision_model_used} 生成）】
 {vision_description[:2000]}
 
-（以上为视觉模型对学生提交图片的描述，请结合文字内容综合评分。）
+（以上为视觉模型描述，请结合实际文字内容综合评分。）
 """
     elif use_vision:
-        # 视觉题但没有视觉模型 → 提示按文字判断
-        vision_section = """
-【视觉模型不可用】
-当前未配置视觉模型 API Key，无法查看图片/视频帧。
-请仅根据文字内容评分。视觉相关项（设计、排版、服饰、背景等）以文字描述为准，描述合理即给满分。
-"""
+        vision_section = "\n【注意】视觉模型不可用，无法查看图片/视频帧。\n"
 
     score_keys = "\n".join(f'  "得分_{c["id"]}_{c["name"]}": <int>,' for c in criteria)
-    prompt = f"""你是考试评分专家。根据题目要求和评分标准，对学生的提交内容打分。
+    prompt = f"""你是严格的考试评分专家。必须基于提交材料的实际证据评分，不能凭空给分。
 
 题目：{question['name']}（满分{max_score}分）
 题目要求：{description[:800]}
@@ -458,22 +616,34 @@ def _grade_llm(q_data, question, config, use_vision=False):
 评分标准：
 {criteria_text}
 
+【提交材料证据报告】
+{evidence_report}
+
+【该题要求提交的材料】
+{requirements_text}
+
 {mode_guidance}
-检测到的材料：{', '.join(material_hints) if material_hints else '无'}
+
+{strategy_rules}
+{hybrid_rules}
 {vision_section}
 学生提交内容：
 {content_desc[:2000]}
 {rule_ctx}
 
-输出 JSON（不要markdown）：
+输出 JSON（不要markdown，不要注释）：
 {{{{
   "档位判定": "<材料齐全/材料不足/敷衍/空>",
 {score_keys}
   "总分": <int>,
-  "评语": "<30字>"
+  "评语": "<30字，指出缺失材料和扣分原因>"
 }}}}
 
-注意：材料齐全且内容正确即给满分，不要无故扣分。没提交的项给0分。"""
+评分铁律（按优先级执行）：
+1. 材料证据报告显示某项存在 → 学生已提交 → 应给满分或接近满分
+2. 系统无法查看图片/视频是技术限制，不是学生的错 → 不要因此扣分
+3. 只有在确实没有任何提交痕迹（无文字+无截图标记+无链接+无文件）时才给0
+4. 学生有详细文字描述 = 学生认真完成了作业 = 应得高分"""
 
     try:
         # 始终用文本模型评分（便宜），视觉模型只负责描述

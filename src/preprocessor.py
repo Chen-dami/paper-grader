@@ -24,14 +24,20 @@ def process(paper_data: dict, rubric: dict, config: dict) -> dict:
     quality = config.get("image", {}).get("quality", 75)
     skip_below = config.get("image", {}).get("skip_below_kb", 50)
 
-    # 缩图
+    # 缩图 + 保留位置信息
+    # 图片元组格式: (local_path, width, height, size_bytes, order_idx, table_idx)
     images = []
-    for img_path, w, h, size in paper_data.get("images", []):
+    for t in paper_data.get("images", []):
+        if len(t) < 4:
+            continue
+        img_path, w, h, size = t[0], t[1], t[2], t[3]
+        order_idx = t[4] if len(t) >= 5 else -1
+        table_idx = t[5] if len(t) >= 6 else -1
         if size < skip_below * 1024:
             continue
         resized_path = _resize_image(img_path, max_width, quality)
         if resized_path:
-            images.append((resized_path, w, h))
+            images.append((resized_path, w, h, order_idx, table_idx))
 
     # 嵌入文件
     excel_files = [f for f, ext in paper_data.get("embedded_files", [])
@@ -49,11 +55,14 @@ def process(paper_data: dict, rubric: dict, config: dict) -> dict:
     if not table_map or len(table_map) < len(rubric["questions"]):
         table_map = _llm_fallback_extraction(tables, rubric, config)
 
+    # ---- 计算每道题在文档中的表格索引（用于图片按题分配） ----
+    q_table_indices = _compute_question_positions(tables, table_map)
+
     # ---- 提取各题内容 ----
     result = {
         "student": paper_data.get("student_info", {}),
         "paper_dir": paper_data.get("paper_dir", ""),
-        "all_images": images,
+        "all_images": [(p, w, h) for p, w, h, _, _ in images],  # 兼容旧格式
     }
 
     for q in rubric["questions"]:
@@ -61,7 +70,8 @@ def process(paper_data: dict, rubric: dict, config: dict) -> dict:
         content_tables = table_map.get(qid, [])
         try:
             q_data = _extract_question(content_tables, q, images,
-                                        excel_files, video_files, paragraphs)
+                                        excel_files, video_files, paragraphs,
+                                        q_table_indices.get(qid, set()))
         except Exception:
             q_data = {
                 "prompt_text": "", "result_text": "", "image_prompt": "",
@@ -313,15 +323,21 @@ def _parse_json(text: str) -> dict:
 
 def _extract_question(content_tables: list, question: dict,
                       images: list, excel_files: list,
-                      video_files: list, paragraphs: list) -> dict:
+                      video_files: list, paragraphs: list,
+                      question_table_indices: set = None) -> dict:
     """
     从内容表中提取该题的所有字段。
     使用 question.submission_labels 指导提取。
+
+    images: [(path, w, h, order_idx, table_idx), ...]
+    question_table_indices: 属于本题的 tables 索引集合
     """
     qid = question["id"]
     qname = question.get("name", "")
     gtype = question.get("grading_type", "text")
     labels = question.get("submission_labels", [])
+    if question_table_indices is None:
+        question_table_indices = set()
 
     # 合并内容表的所有行
     all_rows = []
@@ -378,8 +394,44 @@ def _extract_question(content_tables: list, question: dict,
         result["all_table_text"] = _extract_all_text(content_tables)
 
     # ---- 通用资源提取 ----
-    # 截图检测
-    result["has_screenshot"] = len(images) >= 2 or _has_label(all_rows, ["截图", "screen"])
+    # 按题分配图片（解决多vision题共享图片Bug #1）
+    # images 格式: [(path, w, h, order_idx, table_idx), ...]
+    question_images = []      # 属于本题的图片
+    other_question_images = []  # 属于其他题的图片
+    unassigned_images = []     # 无法确定归属的图片（table_idx == -1）
+
+    for img in images:
+        if len(img) < 5:
+            # 旧版兼容
+            path, w, h = img[0], img[1], img[2]
+            question_images.append((path, w, h))
+            continue
+        path, w, h, order_idx, table_idx = img[0], img[1], img[2], img[3], img[4]
+        if table_idx >= 0 and question_table_indices:
+            if table_idx in question_table_indices:
+                question_images.append((path, w, h))
+            else:
+                other_question_images.append((path, w, h))
+        else:
+            # table_idx == -1: 无法确定归属（图片在段落中但没表格上下文）
+            # 或 question_table_indices 为空：表格匹配失败，回退到全部分配
+            unassigned_images.append((path, w, h))
+
+    # 如果无法按表格分配（表格匹配失败、或旧版图片格式），回退：全给本题
+    if not question_images and not other_question_images and unassigned_images:
+        question_images = unassigned_images
+    elif unassigned_images:
+        # 无法确定的图片也分配给本题（宁可多给不可漏掉）
+        question_images.extend(unassigned_images)
+
+    # 截图检测（按本题图片数，解决跨题污染Bug #3）
+    # 注意：不能用 _has_label 简单匹配"截图"二字，因为模板标签也含有"截图"
+    # 只有在以下情况才认为有截图：
+    # 1. 实际检测到 >= 1 张属于本题的图片
+    # 2. 表格行中有"截图"标签，且同行有其他单元格有学生填写的内容(>20字)
+    has_screenshot_from_images = len(question_images) >= 1
+    has_screenshot_from_labels = _has_screenshot_evidence(all_rows)
+    result["has_screenshot"] = has_screenshot_from_images or has_screenshot_from_labels
 
     # 视频检测 —— 仅 vision 类型且名称含"视频"的题目分配
     _needs_video = (gtype == "vision" and ("视频" in qname or "video" in qname.lower()))
@@ -439,13 +491,30 @@ def _extract_question(content_tables: list, question: dict,
 
     # ---- 图片分配（给 vision 类题目） ----
     if gtype == "vision":
-        # 按面积排序取大图（不再强制方形，截图和生成图都需评估）
-        valid_imgs = [(p, w, h) for p, w, h in images
+        valid_imgs = [(p, w, h) for p, w, h in question_images
                        if w > 200 and h > 200]
-        # 按面积降序排列
-        valid_imgs.sort(key=lambda x: x[1] * x[2], reverse=True)
+
+        # 智能排序：优先选生成图（接近正方形），截图/全屏图排后面
+        # 截图特征：宽高比 > 1.5 或 < 0.67（16:9, 16:10, 4:3 等）
+        # 生成图特征：接近正方形（0.8 ~ 1.25）
+        def _img_priority(item):
+            _p, w, h = item
+            area = w * h
+            # 宽高比越接近1越好
+            ratio = w / max(h, 1)
+            if ratio < 1:
+                ratio = 1 / ratio
+            # 接近正方形 -> ratio_near_1 接近 0（好）
+            ratio_near_1 = abs(ratio - 1.0)
+            # 截图惩罚：宽高比偏离大 -> 分数降低
+            screenshot_penalty = 3.0 if ratio_near_1 > 0.3 else 0.0
+            # 最终分数：面积大 + 接近正方形 = 高分
+            return area - (screenshot_penalty * area * 0.5)
+
+        valid_imgs.sort(key=_img_priority, reverse=True)
         all_paths = [p for p, w, h in valid_imgs]
-        # 前3张作为生成图，第4张作为参考图
+
+        # 前3张作为生成图候选，第4张作为参考图
         result["generated_images"] = all_paths[:3]
         if len(all_paths) > 3:
             result["reference_image"] = all_paths[3]
@@ -483,6 +552,8 @@ def _extract_text_by_label(rows: list, labels: list) -> str:
 
 def _extract_content_after_label(rows: list, keywords: list) -> str:
     """找标签行后面的实际内容行"""
+    # 长文本不检查关键词过滤（如 persona_text 可能含"提交"等词）
+    _SKIP_KW = ["截图", "链接", "文件", "图片", "视频"]  # 去掉"提交"：persona_text经常含此词
     for i, row in enumerate(rows):
         row_str = " ".join(str(c) for c in row)
         for kw in keywords:
@@ -493,15 +564,14 @@ def _extract_content_after_label(rows: list, keywords: list) -> str:
                 for c in rows[j]:
                     s = str(c).strip()
                     if s and len(s) > 5:
-                        if not any(kw2 in s for kw2 in ["截图", "链接", "提交", "文件", "图片", "视频"]):
+                        # 长文本(>50字)不检查关键词，短文本才检查
+                        if len(s) > 50 or not any(kw2 in s for kw2 in _SKIP_KW):
                             return s
             # 策略2：后续行无内容，从同单元格提取（标签+内容在同一格）
             if len(row_str) > len(kw) + 10:
-                # 提取标签后面的部分
                 idx = row_str.find(kw)
                 if idx >= 0:
                     after = row_str[idx + len(kw):].strip()
-                    # 去掉冒号等前缀标点
                     after = after.lstrip("：:：、。， ")
                     if len(after) > 3:
                         return after
@@ -518,6 +588,25 @@ def _has_label(rows: list, keywords: list) -> bool:
     return False
 
 
+def _has_screenshot_evidence(rows: list) -> bool:
+    """
+    检查是否有截图的实际证据（不仅是模板标签）。
+    需要：行中有"截图"关键词，且同一行的其他单元格有学生填写的实质内容。
+    只检查同行内 — 模板标签如"知识库预览页截图："后面空白的不算。
+    注意：标签本身通常<20字，所以只看同行其他单元格是否有长内容。
+    """
+    for row in rows:
+        row_str = " ".join(str(c) for c in row)
+        if not any(kw in row_str for kw in ["截图", "屏幕截图"]):
+            continue
+        # 同行中除了标签单元格之外，还有其他单元格有实质内容(>20字)
+        for c in row:
+            s = str(c).strip()
+            if len(s) > 20 and not any(kw in s for kw in ["截图", "屏幕截图"]):
+                return True
+    return False
+
+
 def _extract_all_text(tables: list) -> str:
     """提取表格所有文本"""
     texts = []
@@ -528,6 +617,44 @@ def _extract_all_text(tables: list) -> str:
                 if s and len(s) > 3:
                     texts.append(s)
     return "\n".join(texts)
+
+
+def _compute_question_positions(tables: list, table_map: dict) -> dict:
+    """
+    计算每道题在文档中的表格索引范围（用于图片按题分配）。
+    返回: {qid: set_of_table_indices}
+
+    每个图片带有一个 table_idx（所属表格在 doc.tables 中的索引），
+    通过判断 table_idx 是否在本题的索引集合中来分配图片。
+
+    范围不仅包括内容表，还包括前后各一个表格（覆盖表头表等）。
+    """
+    positions = {}
+    table_id_to_idx = {id(t): i for i, t in enumerate(tables)}
+
+    for qid, ctables in table_map.items():
+        if not ctables:
+            positions[qid] = set()
+            continue
+        idx_set = set()
+        for ct in ctables:
+            idx = table_id_to_idx.get(id(ct))
+            if idx is not None:
+                idx_set.add(idx)
+        if idx_set:
+            # 扩展范围：前后各加1个表格（覆盖表头表、图注等）
+            expanded = set()
+            for idx in idx_set:
+                expanded.add(idx)
+                if idx > 0:
+                    expanded.add(idx - 1)
+                if idx < len(tables) - 1:
+                    expanded.add(idx + 1)
+            positions[qid] = expanded
+        else:
+            positions[qid] = set()
+
+    return positions
 
 
 def _longest_text(rows: list) -> str:

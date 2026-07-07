@@ -248,6 +248,27 @@ with tab2:
         class_name = cn2 or "默认班级"
         st.success(f"已接收 {len(found)} 份试卷 -> 班级：{class_name}")
 
+# ---- 视觉题评分方式 ----
+vision_questions = []
+if has_rubric:
+    rubric = lr(rubric_path)
+    if rubric:
+        vision_questions = [q for q in rubric.get("questions", [])
+                           if q.get("grading_type") in ("vision", "hybrid")]
+
+if vision_questions:
+    st.divider()
+    st.subheader("视觉题评分方式")
+    st.caption("勾选 = AI识别图片 | 取消 = 老师自己看图（AI只看文字）")
+    for q in vision_questions:
+        key = f"ai_vision_q{q['id']}"
+        st.session_state.setdefault(key, True)  # 默认AI识别
+        st.checkbox(
+            f"Q{q['id']} {q['name']} ({q['max_score']}分) — AI识别图片",
+            value=st.session_state[key],
+            key=key,
+        )
+
 # ---- 阅卷 ----
 st.divider()
 st.subheader("第三步：开始阅卷")
@@ -273,6 +294,17 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
         st.stop()
 
     config["llm"]["api_key"] = key
+    # 注入视觉策略（从 config.yaml，UI 已保存）
+    vision_strategy = config.get("model_router", {}).get("vision_strategy", "paid_vision")
+    config["vision_strategy"] = vision_strategy
+    # 按题跳过视觉：ai_vision_q{id}=False 的题老师自己看图
+    skip_vision_ids = {
+        q["id"] for q in vision_questions
+        if not st.session_state.get(f"ai_vision_q{q['id']}", True)
+    }
+    if skip_vision_ids:
+        st.info(f"已设为老师看图：Q{', Q'.join(str(i) for i in sorted(skip_vision_ids))}")
+
     llm.init_llm(config.get("llm", {}))
     db.init_db(config.get("database", {}))
 
@@ -330,7 +362,8 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                 qk = f"q{qid}"
                 if qk not in clean: continue
                 try:
-                    r = grade(clean[qk], q, config)
+                    r = grade(clean[qk], q, config,
+                             force_no_vision=(qid in skip_vision_ids))
                     all_scores[qid] = r
                     total_score += r.get("总分", 0)
                     # 记录模型使用（用于降级警告）
@@ -502,6 +535,17 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     st.session_state.grading_results = all_class_results
     st.session_state.current_class = " + ".join(by_class.keys())
     st.session_state._plag_summary = plag_summary
+
+    # ---- LLM 错误检测 ----
+    total_llm_errors = 0
+    for cn, results in all_class_results.items():
+        for r in results:
+            ms = r.get("_model_used_summary", {})
+            total_llm_errors += ms.get("none(error)", 0)
+    if total_llm_errors > 0:
+        st.error(f"LLM 调用失败 {total_llm_errors} 次！请检查 API Key 是否有效。"
+                 f"所有 LLM 评分的题目将显示为 0 分。"
+                 f"请在「评分配置 → 模型路由」中点击「检测API Key」确认。")
 
     st.divider()
     st.subheader("📊 成绩总览")

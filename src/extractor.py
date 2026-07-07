@@ -47,8 +47,11 @@ def extract(docx_path: str, output_dir: str = "output") -> dict:
             rows.append(cells)
         tables.append(rows)
 
-    # ---- 3. 提取图片 ----
+    # ---- 3. 提取图片（按文档中的出现顺序，并记录所在表位置） ----
     images = []
+    # 获取图片在文档中出现的顺序，及其附近表格索引
+    # img_order: {media_filename: (order_idx, table_index)}
+    img_order = _get_image_document_order(docx_path)
     with zipfile.ZipFile(docx_path, 'r') as z:
         for name in z.namelist():
             if 'media' in name and not name.endswith('/'):
@@ -63,7 +66,12 @@ def extract(docx_path: str, output_dir: str = "output") -> dict:
 
                 # 读取图片尺寸
                 width, height = _get_image_size(data, fname)
-                images.append((local_path, width, height, len(data)))
+                # order_idx: 图片在文档中的序号, table_idx: 最近的表格索引
+                order_idx, table_idx = img_order.get(fname, (-1, -1))
+                images.append((local_path, width, height, len(data), order_idx, table_idx))
+
+    # 按 order_idx 排序，确保图片按文档顺序排列
+    images.sort(key=lambda x: x[4] if len(x) >= 5 and x[4] >= 0 else 99999)
 
     # ---- 4. 提取嵌入文件（OLE 对象） ----
     embedded_files = []
@@ -249,7 +257,7 @@ def extract_from_student_folder(docx_path: str, output_dir: str = "output",
                 shutil.copy2(img_path, dest)
             size = os.path.getsize(dest)
             w, h = _get_image_size(open(dest, "rb").read(), fname)
-            paper["images"].insert(0, (dest, w, h, size))
+            paper["images"].insert(0, (dest, w, h, size, -1, -1))  # -1 = 位置未知（外部文件）
 
         for xlsx_path in supplementary_files.get("excel", []):
             if not os.path.exists(xlsx_path):
@@ -308,3 +316,78 @@ def _parse_student_info(paragraphs: list, tables: list, docx_path: str = "") -> 
             info['班级'] = grandparent
 
     return info
+
+
+def _get_image_document_order(docx_path: str) -> dict:
+    """
+    解析 document.xml 获取图片在文档中的出现顺序及所在表格。
+    返回: {media_filename: (order_idx, table_idx)}
+    - order_idx: 图片在文档中出现的序号（0-based，越小越靠前）
+    - table_idx: 图片所在的表格索引（对应 doc.tables 的索引），-1 表示不在表格内
+    """
+    import zipfile as _zf
+    try:
+        from lxml import etree
+    except ImportError:
+        return {}
+
+    result = {}
+    try:
+        with _zf.ZipFile(docx_path, 'r') as z:
+            # 1. 解析 relationships: rId -> media 文件
+            rels_xml = z.read('word/_rels/document.xml.rels')
+            rels_root = etree.fromstring(rels_xml)
+            ns_rel = 'http://schemas.openxmlformats.org/package/2006/relationships'
+            rId_to_target = {}
+            for rel in rels_root.findall(f'{{{ns_rel}}}Relationship'):
+                rid = rel.get('Id', '')
+                target = rel.get('Target', '')
+                if 'media' in target.lower() or 'image' in target.lower():
+                    rId_to_target[rid] = os.path.basename(target)
+
+            # 2. 解析 document.xml: 遍历 body 子元素（段落+表格交替）
+            doc_xml = z.read('word/document.xml')
+            doc_root = etree.fromstring(doc_xml)
+
+            w_ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+            a_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+            r_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+            body = doc_root.find(f'{{{w_ns}}}body')
+            if body is None:
+                return {}
+
+            order_counter = 0
+            table_counter = 0  # 对应 doc.tables 的索引
+            last_table_idx = -1  # 最近经过的表格索引
+
+            for elem in body:
+                tag = elem.tag
+
+                if tag == f'{{{w_ns}}}tbl':
+                    # 表格：检查表格内的图片
+                    for blip in elem.findall(f'.//{{{a_ns}}}blip'):
+                        embed = blip.get(f'{{{r_ns}}}embed', '')
+                        if embed and embed in rId_to_target:
+                            fname = rId_to_target[embed]
+                            if fname not in result:
+                                result[fname] = (order_counter, table_counter)
+                                order_counter += 1
+                    table_counter += 1
+                    last_table_idx = table_counter - 1
+
+                elif tag == f'{{{w_ns}}}p':
+                    # 段落：检查段落内的图片
+                    for blip in elem.findall(f'.//{{{a_ns}}}blip'):
+                        embed = blip.get(f'{{{r_ns}}}embed', '')
+                        if embed and embed in rId_to_target:
+                            fname = rId_to_target[embed]
+                            if fname not in result:
+                                # 图片在段落中：关联到最近的上一个表格
+                                result[fname] = (order_counter, last_table_idx)
+                                order_counter += 1
+
+    except Exception:
+        return {}
+
+    return result
