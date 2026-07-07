@@ -1,57 +1,40 @@
 @echo off
-chcp 65001 >nul
-setlocal enabledelayedexpansion
-title 更新阅卷系统
+setlocal
 cd /d "%~dp0"
 
-echo.
-echo   ============================
-echo     更新阅卷系统
-echo   ============================
+echo ============================================
+echo   AI Grading System - Update
+echo ============================================
 echo.
 
 where git >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   [FAIL] 未找到 Git, 无法自动更新
-    echo   请安装 Git: https://git-scm.com/download/win
-    echo   或手动下载最新版覆盖本目录
+if errorlevel 1 (
+    echo Git not found. Cannot auto-update.
+    echo Install Git: https://git-scm.com/download/win
+    echo Or re-download from: https://github.com/Chen-dami/paper-grader
     pause
     exit /b 1
 )
 
-echo   [1/3] 检查新版本...
-git fetch origin
-for /f "tokens=*" %%a in ('git rev-parse HEAD') do set OLD=%%a
-for /f "tokens=*" %%a in ('git rev-parse origin/master') do set NEW=%%a
-
-if "%OLD%"=="%NEW%" (
-    echo   [OK]  已是最新版本, 无需更新
-    pause
-    exit /b 0
-)
-
-echo   发现新版本, 正在拉取...
+echo [1/2] Pulling latest code...
 git pull origin master
-if %errorlevel% neq 0 (
-    echo   [FAIL] 拉取失败, 请检查网络
+if errorlevel 1 (
+    echo FAIL: git pull failed. Check network.
     pause
     exit /b 1
 )
-echo   [OK]  代码已更新
+echo   OK
 echo.
 
-echo   [2/3] 更新依赖...
+echo [2/2] Updating dependencies...
 if exist ".venv\Scripts\python.exe" (
     .venv\Scripts\python.exe -m pip install -r requirements.txt -q --upgrade -i https://pypi.tuna.tsinghua.edu.cn/simple
-    echo   [OK]  依赖已更新
+    echo   OK
 ) else (
-    echo   [WARN] 虚拟环境不存在, 请先运行 setup.bat
+    echo   WARN: no .venv found, run setup.bat first
 )
 echo.
-
-echo   [3/3] 更新完成!
-echo.
-echo   ============================
-echo   请重新启动阅卷系统
-echo   ============================
+echo ============================================
+echo   Update complete! Restart the app.
+echo ============================================
 pause
