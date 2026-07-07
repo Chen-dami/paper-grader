@@ -198,8 +198,12 @@ def _collect_text(q_data, gtype):
 #  档位检测（规则引擎用，code类型保留）
 # ============================================================
 def _detect_tier(q_data: dict, question: dict, config: dict) -> str:
-    keywords = question.get("topic_keywords", [])
+    # 先检查是否真正为空（无实质内容），避免模板标签触发高分段位
     gtype = question.get("grading_type", "text")
+    if _is_truly_empty(q_data, gtype):
+        return "空"
+
+    keywords = question.get("topic_keywords", [])
     all_text = _collect_text(q_data, gtype)
     tiers_cfg = list((config.get("grading", {}) or {}).get("tiers", {}).keys())
 

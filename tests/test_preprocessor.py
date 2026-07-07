@@ -352,7 +352,7 @@ class TestExtractQuestion:
 
     def test_screenshot_label_detection(self):
         """表格含"截图"标签 + 同行有学生内容 >20字 → 检测到截图"""
-        content_tables = [[["提示词", "生成结果截图", "学生写了很长的提示词描述了海报设计要求"]]]
+        content_tables = [[["提示词", "生成结果截图", "学生写了很长的提示词描述了海报设计的具体要求包括颜色构图风格字体"]]]
         question = {
             "id": 1, "name": "文本生成",
             "grading_type": "text",
