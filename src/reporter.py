@@ -397,3 +397,103 @@ def _grade(score: float, total: float) -> str:
         return "D 及格"
     else:
         return "F 不及格"
+
+
+def class_analysis_report(results: list, rubric: dict, output_dir: str, class_name: str) -> str:
+    """生成班级丢分分析报告（文本格式），列出每人丢分原因+班级建议"""
+    if not results:
+        return ""
+
+    questions = rubric["questions"]
+    total_max = rubric["exam"]["total_score"]
+
+    lines = []
+    lines.append(f"《{rubric['exam']['name']}》{class_name} 丢分分析报告")
+    lines.append(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    # 统计
+    scores_list = [r.get("total_score", 0) for r in results]
+    avg_score = sum(scores_list) / len(scores_list) if scores_list else 0
+    pass_count = sum(1 for s in scores_list if s >= 60)
+    fail_count = len(scores_list) - pass_count
+
+    lines.append(f"班级人数：{len(results)}  平均分：{avg_score:.1f}  及格：{pass_count}人  不及格：{fail_count}人")
+    lines.append("")
+
+    # 各题平均得分率
+    lines.append("各题得分率：")
+    for q in questions:
+        q_scores = [r.get(q["name"], 0) for r in results if q["name"] in r]
+        q_avg = sum(q_scores) / len(q_scores) if q_scores else 0
+        q_rate = q_avg / q["max_score"] * 100 if q["max_score"] > 0 else 0
+        indicator = "⚠️" if q_rate < 60 else ("✅" if q_rate >= 80 else "🟡")
+        lines.append(f"  {indicator} Q{q['id']} {q['name']}：平均{q_avg:.1f}/{q['max_score']}（{q_rate:.0f}%）")
+    lines.append("")
+
+    # 每人详情
+    lines.append("-" * 60)
+    lines.append("个人详情（按总分从低到高排列）")
+    lines.append("-" * 60)
+
+    sorted_results = sorted(results, key=lambda r: r.get("total_score", 0))
+    for i, r in enumerate(sorted_results):
+        sid = r.get("student_id", "?")
+        name = r.get("student_name", "?")
+        total = r.get("total_score", 0)
+        grade_label = _grade(total, total_max)
+        criteria = r.get("_criteria", {})
+
+        loss_parts = []
+        for q in questions:
+            qid = str(q["id"])
+            q_name = q["name"]
+            q_score = r.get(q_name, 0)
+            if q_score < q["max_score"] * 0.7:
+                q_criteria = criteria.get(qid, {})
+                lost_items = []
+                for cid, cd in q_criteria.items():
+                    sc = cd.get("score", 0)
+                    mx = cd.get("max", 0)
+                    if mx > 0 and sc < mx * 0.7:
+                        lost_items.append(f"{cd.get('name','?')}({sc}/{mx})")
+                if lost_items:
+                    loss_parts.append(f"Q{q['id']} {q_name}: {'; '.join(lost_items)}")
+
+        lines.append(f"{i+1}. {sid} {name}  总分={total}/{total_max} ({grade_label})")
+        if loss_parts:
+            for lp in loss_parts:
+                lines.append(f"     {lp}")
+        else:
+            lines.append(f"     （各项得分正常，无显著丢分项）")
+        lines.append("")
+
+    # 班级建议
+    lines.append("=" * 60)
+    lines.append("班级整体建议")
+    lines.append("=" * 60)
+
+    weak_questions = []
+    for q in questions:
+        q_scores = [r.get(q["name"], 0) for r in results if q["name"] in r]
+        q_avg = sum(q_scores) / len(q_scores) if q_scores else 0
+        q_rate = q_avg / q["max_score"] * 100 if q["max_score"] > 0 else 0
+        if q_rate < 60:
+            weak_questions.append((q, q_rate))
+
+    if weak_questions:
+        lines.append("以下题目班级整体薄弱，建议加强教学：")
+        for q, rate in weak_questions:
+            lines.append(f"  · Q{q['id']} {q['name']}（得分率仅{rate:.0f}%）")
+    else:
+        lines.append("各题得分率均较好，无显著薄弱环节。")
+
+    if fail_count > len(results) * 0.3:
+        lines.append(f"⚠️ 不及格率高达{fail_count/len(results)*100:.0f}%，建议重点关注。")
+
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, f"丢分分析_{class_name}.txt")
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    return filepath

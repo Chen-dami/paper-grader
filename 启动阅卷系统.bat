@@ -1,66 +1,60 @@
 @echo off
-title Grading System
+setlocal enabledelayedexpansion
+title AI 阅卷系统
 cd /d "%~dp0"
 
 echo.
-echo   ========================================
-echo         Grading System
-echo   ========================================
+echo   ============================
+echo     AI 阅卷系统
+echo   ============================
 echo.
 
-REM Kill old process on port 8501
-echo   [1/3] Cleaning old process...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8501" ^| findstr "LISTENING"') do (
+echo   [1/3] 释放端口...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8501"') do (
     taskkill /F /PID %%a >nul 2>&1
+    echo   [OK]  8501 端口已释放
 )
-echo   Done
-echo.
 
-REM Find Python: 1) system PATH  2) bundled .venv  3) common locations
-echo   [2/3] Finding Python...
-set PYTHON=python
+echo   [2/3] 查找 Python...
+set PY=python
 
-REM If .venv python exists AND works, use it
 if exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" --version >nul 2>&1
-    if not errorlevel 1 (
-        set PYTHON=.venv\Scripts\python.exe
-        echo   Using bundled .venv
+    if !errorlevel! equ 0 (
+        set PY=.venv\Scripts\python.exe
+        echo   [OK]  使用项目 .venv
     )
+) else (
+    echo   [提示] 首次使用请先运行 "一键安装.bat"
 )
 
-REM Verify it works
-%PYTHON% --version >nul 2>&1
-if errorlevel 1 (
-    echo   Python not found in PATH or .venv
-    echo   Please install Python 3.8+ and add it to PATH
-    echo   Then run: pip install -r requirements.txt
+!PY! --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo   [FAIL] Python 未找到
+    echo   请先运行 "一键安装.bat"
     pause
     exit /b 1
 )
-echo   OK  [%PYTHON%]
-echo.
+echo   [OK]  !PY!
 
-REM Install deps if missing
-%PYTHON% -c "import streamlit" >nul 2>&1
-if errorlevel 1 (
-    echo   Installing dependencies...
-    %PYTHON% -m pip install -r requirements.txt -q
-    if errorlevel 1 (
-        echo   Failed to install. Try manually:
-        echo     %PYTHON% -m pip install -r requirements.txt
-        pause
-        exit /b 1
-    )
+echo   [3/3] 启动服务...
+
+!PY! -c "import streamlit" >nul 2>&1
+if !errorlevel! neq 0 (
+    echo   [提示] 依赖缺失, 正在安装...
+    !PY! -m pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple
 )
 
-REM Start
-echo   [3/3] Starting http://localhost:8501
-echo   ========================================
+echo.
+echo   ============================
+echo   浏览器打开 http://localhost:8501
+echo   Ctrl+C 或关闭窗口停止服务
+echo   ============================
 echo.
 
-%PYTHON% -m streamlit run app.py --server.port 8501
+start "" http://localhost:8501
+!PY! -m streamlit run app.py --server.port 8501 --server.headless true
 
 echo.
-echo   Server stopped.
+echo   服务已停止
 pause

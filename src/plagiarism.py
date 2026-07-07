@@ -70,7 +70,7 @@ def check_all(papers_dir: str, grading_results: list = None, output_path: str = 
     # 4. 提取 Excel 指纹
     excel_map = _extract_excel_fingerprints(docx_files)
 
-    # 5. 两两比对
+    # 5. 两两比对（含方向推断）
     pairs = []
     n = len(docx_files)
     for i in range(n):
@@ -81,24 +81,30 @@ def check_all(papers_dir: str, grading_results: list = None, output_path: str = 
                 img_map.get(docx_files[i], []), img_map.get(docx_files[j], []),
                 excel_map.get(docx_files[i], ""), excel_map.get(docx_files[j], ""),
             )
-            # 有分数或有标记信号才记录
             if score > 0 or flags:
+                direction = _infer_direction(meta_list[i], meta_list[j], score)
                 pairs.append({
                     "file_a": os.path.basename(docx_files[i]),
                     "file_b": os.path.basename(docx_files[j]),
-                    "student_a": meta_list[i].get("creator", "?"),
-                    "student_b": meta_list[j].get("creator", "?"),
+                    "student_a": _student_label(meta_list[i]),
+                    "student_b": _student_label(meta_list[j]),
                     "score": score,
                     "reasons": reasons,
                     "flags": flags,
+                    "direction": direction,
+                    "meta_a": meta_list[i],
+                    "meta_b": meta_list[j],
                 })
 
     pairs.sort(key=lambda x: x["score"], reverse=True)
 
-    # 6. 级别分类 + 收集判零记录
+    # 过滤：只保留有实际可疑信号的（分数>0 或 有flag标记）
+    suspicious_pairs = [p for p in pairs if p["score"] > 0 or p.get("flags")]
+
+    # 6. 级别分类 + 收集判零记录（仅对可疑对）
     auto_zero_students = set()
-    zero_records = []  # [{student, file, score_before, reasons}]
-    for p in pairs:
+    zero_records = []
+    for p in suspicious_pairs:
         level = classify_level(p["score"])
         p["level"] = level["key"]
         p["level_label"] = level["label"]
@@ -123,10 +129,11 @@ def check_all(papers_dir: str, grading_results: list = None, output_path: str = 
         else:
             p["auto_zero"] = False
 
-    # 7. 生成报告
-    _generate_report(pairs, meta_list, zero_records, output_path)
+    # 7. 生成报告（只含可疑对）
+    _generate_report(suspicious_pairs, meta_list, zero_records, output_path,
+                     auto_zero_students, len(pairs), len(suspicious_pairs))
 
-    return pairs, auto_zero_students
+    return suspicious_pairs, auto_zero_students
 
 
 # ============================================================
@@ -412,10 +419,70 @@ def _compare_pair(m1: dict, m2: dict, t1: dict, t2: dict,
 
 
 # ============================================================
+#  抄袭方向推断
+# ============================================================
+def _infer_direction(m_a: dict, m_b: dict, score: int) -> str:
+    """推断谁抄谁。返回 'a抄b' / 'b抄a' / '双向' / '?'"""
+    t_a = m_a.get("total_time", 0)
+    t_b = m_b.get("total_time", 0)
+    rev_a = m_a.get("revision", 0)
+    rev_b = m_b.get("revision", 0)
+
+    try:
+        from datetime import datetime
+        mod_a = datetime.fromisoformat(str(m_a.get("modified", "")).replace('Z', '+00:00'))
+        mod_b = datetime.fromisoformat(str(m_b.get("modified", "")).replace('Z', '+00:00'))
+        b_later = mod_b > mod_a  # B 修改时间更晚
+    except Exception:
+        b_later = None
+
+    # 同MD5无法判断方向
+    if m_a.get("file_md5") == m_b.get("file_md5") and score >= 350:
+        return "双向(完全相同)"
+
+    # 评分：b抄a的得分 vs a抄b的得分
+    b_copy_score = 0
+    a_copy_score = 0
+
+    # 编辑时长：短的抄长的
+    if t_a > 0 and t_b > 0:
+        ratio = max(t_a, t_b) / max(min(t_a, t_b), 1)
+        if ratio >= 3:
+            if t_a > t_b:
+                b_copy_score += 20
+            else:
+                a_copy_score += 20
+
+    # 修改时间：晚的抄早的
+    if b_later is True:
+        b_copy_score += 15
+    elif b_later is False:
+        a_copy_score += 15
+
+    # revision：少的抄多的
+    if max(rev_a, rev_b) > 0:
+        if rev_a > rev_b * 2:
+            b_copy_score += 10
+        elif rev_b > rev_a * 2:
+            a_copy_score += 10
+
+    diff = b_copy_score - a_copy_score
+    if diff >= 20:
+        return "B疑似抄A"
+    elif diff <= -20:
+        return "A疑似抄B"
+    elif abs(diff) < 10:
+        return "难以判断"
+    else:
+        return "可疑-方向不明"
+
+
+# ============================================================
 #  报告生成
 # ============================================================
 
-def _generate_report(pairs: list, meta_list: list, zero_records: list, output_path: str):
+def _generate_report(pairs: list, meta_list: list, zero_records: list, output_path: str,
+                     auto_zero_students=None, total_pairs=0, suspicious_count=0):
     """生成查重 Excel 报告。
     Sheet 1: 可疑对（只显示有问题的）
     Sheet 2: 判零记录（谁被自动判零、为什么）
@@ -441,7 +508,7 @@ def _generate_report(pairs: list, meta_list: list, zero_records: list, output_pa
     ws.title = "可疑对"
 
     headers = ["级别", "可疑度", "学生A", "总分A", "学生B", "总分B",
-               "⚠️ 标记信号", "详细原因"]
+               "抄袭方向", "⚠️ 标记信号", "详细原因"]
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=col, value=h)
         c.font = hfont; c.fill = hfill; c.border = border
@@ -455,15 +522,23 @@ def _generate_report(pairs: list, meta_list: list, zero_records: list, output_pa
         m1 = _find_meta(meta_list, p["file_a"])
         m2 = _find_meta(meta_list, p["file_b"])
 
-        # 组装标记信号
         flag_text = "; ".join(p.get("flags", []))
         reason_text = "; ".join(p["reasons"])
+        direction = p.get("direction", "?")
+
+        # 方向着色
+        dir_fill = None
+        if "B疑似抄A" in direction:
+            dir_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+        elif "A疑似抄B" in direction:
+            dir_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
         values = [
             p.get("level_label", ""),
             score,
             _student_label(m1), m1.get("total_score", "") if m1 else "",
             _student_label(m2), m2.get("total_score", "") if m2 else "",
+            direction,
             flag_text,
             reason_text,
         ]
@@ -472,6 +547,10 @@ def _generate_report(pairs: list, meta_list: list, zero_records: list, output_pa
             c.border = border
             if fill:
                 c.fill = fill
+            if col == 6 and dir_fill:  # 方向列着色
+                c.fill = dir_fill
+            if col == 8 and flag_text:
+                c.fill = yellow_fill
             # 标记列标黄
             if col == 7 and flag_text:
                 c.fill = yellow_fill
@@ -482,8 +561,9 @@ def _generate_report(pairs: list, meta_list: list, zero_records: list, output_pa
     ws.column_dimensions['D'].width = 8
     ws.column_dimensions['E'].width = 22
     ws.column_dimensions['F'].width = 8
-    ws.column_dimensions['G'].width = 45
-    ws.column_dimensions['H'].width = 60
+    ws.column_dimensions['G'].width = 16
+    ws.column_dimensions['H'].width = 45
+    ws.column_dimensions['I'].width = 60
 
     # ========================
     # Sheet 2: 判零记录
@@ -512,7 +592,39 @@ def _generate_report(pairs: list, meta_list: list, zero_records: list, output_pa
         ws2.cell(row=2, column=1, value="（无）").border = border
 
     # ========================
-    # Sheet 3: 元数据总览
+    # Sheet 3: 查重总结
+    # ========================
+    ws3 = wb.create_sheet("查重总结")
+    total_pairs_val = total_pairs or len(pairs)
+    suspicious_count_val = suspicious_count or len([p for p in pairs if p["score"] >= 100])
+    confirmed_count = len([p for p in pairs if p.get("level") == "confirmed"])
+    students_flagged = set()
+    for p in pairs:
+        if p["score"] > 0:
+            students_flagged.add(p["file_a"])
+            students_flagged.add(p["file_b"])
+
+    auto_zero_count = len(auto_zero_students) if auto_zero_students else 0
+
+    summary_data = [
+        ("总对比对数", total_pairs_val),
+        ("可疑对 (>=100分)", suspicious_count_val),
+        ("确认抄袭 (>=300分)", confirmed_count),
+        ("涉及学生数", len(students_flagged)),
+        ("自动判零学生数", auto_zero_count),
+    ]
+    ws3.cell(row=1, column=1, value="指标").font = hfont
+    ws3.cell(row=1, column=1).fill = hfill
+    ws3.cell(row=1, column=2, value="数值").font = hfont
+    ws3.cell(row=1, column=2).fill = hfill
+    for i, (label, val) in enumerate(summary_data):
+        ws3.cell(row=2+i, column=1, value=label).border = border
+        ws3.cell(row=2+i, column=2, value=val).border = border
+    ws3.column_dimensions['A'].width = 20
+    ws3.column_dimensions['B'].width = 12
+
+    # ========================
+    # Sheet 4: 元数据总览
     # ========================
     ws3 = wb.create_sheet("元数据")
     mheaders = ["文件名", "学号", "姓名", "总分", "文件MD5(前8位)", "Application ID(尾20)",

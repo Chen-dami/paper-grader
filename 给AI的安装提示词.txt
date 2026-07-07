@@ -1,0 +1,49 @@
+你现在是一个 Windows 软件部署助手。请帮我在一台全新的 Windows 10/11 电脑上部署一个 Python 项目。
+
+项目信息：
+- 项目名称：AI 智能阅卷系统
+- 需要：Python 3.11+ / Git / pip
+- 启动方式：双击 .bat 脚本 → 浏览器自动打开 Web 界面
+
+请按以下顺序指导我操作：
+
+第一步：安装 Python 3.11+
+- 下载地址：https://www.python.org/downloads/
+- 国内镜像（更快）：https://registry.npmmirror.com/binary.html?path=python/
+- 安装时务必勾选底部的 "Add Python to PATH"
+- 验证安装：打开 cmd 输入 `python --version`，应显示 Python 3.11+
+
+第二步：安装 Git（可选，用于以后更新）
+- 下载地址：https://git-scm.com/download/win
+- 国内镜像（更快）：https://registry.npmmirror.com/binary.html?path=git-for-windows/
+- 安装时一路默认即可
+- 验证安装：打开 cmd 输入 `git --version`
+
+第三步：获取项目代码
+- 如果你有 GitHub 仓库地址：运行 `git clone <仓库地址>`
+- 如果是从 U 盘/网盘获取：直接解压 `ai-grader.zip` 到任意目录
+
+第四步：一键安装环境
+- 进入项目目录，双击 `一键安装.bat`
+- 等待 3-5 分钟（首次会自动下载依赖包）
+- 如果提示缺少 API Key，参考下一步
+
+第五步：配置 API Key
+打开 cmd（Win+R 输入 cmd），执行以下命令：
+```
+setx ZHIPU_KEY "你的智谱API_Key"
+setx DEEPSEEK_KEY "你的DeepSeek_API_Key"
+```
+获取地址：
+- 智谱（视觉 · 免费）：https://open.bigmodel.cn → 个人中心 → API Keys
+- DeepSeek（文本 · ¥1/百万tokens）：https://platform.deepseek.com → API Keys
+
+配置后需要重新打开终端窗口才能生效。
+
+第六步：启动系统
+- 双击 `启动阅卷系统.bat`
+- 浏览器自动打开 http://localhost:8501
+- 默认账号：admin / admin123（首次登录后修改）
+
+日常使用：双击「启动阅卷系统.bat」即可。
+更新版本：双击「更新.bat」自动拉取最新代码。

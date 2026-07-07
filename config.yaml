@@ -7,7 +7,7 @@ llm:
   max_tokens: 2048
   temperature: 0.3
 grading:
-  mode: normal
+  mode: strict
   pass_line: 60
   tiers:
     贴合主题:
@@ -15,47 +15,55 @@ grading:
       ratio_max: 1.0
       desc: ''
     跑题:
-      ratio_min: 0.5
-      ratio_max: 0.8
+      ratio_min: 0.4
+      ratio_max: 0.7
       desc: ''
     有链接:
-      ratio_min: 0.9
+      ratio_min: 1.0
       ratio_max: 1.0
       desc: ''
     无链接:
-      ratio_min: 0.3
+      ratio_min: 0.2
       ratio_max: 0.5
       desc: ''
     有视频:
-      ratio_min: 0.9
+      ratio_min: 1.0
       ratio_max: 1.0
       desc: ''
     无视频:
-      ratio_min: 0.3
+      ratio_min: 0.2
       ratio_max: 0.5
       desc: ''
     有截图:
-      ratio_min: 0.9
+      ratio_min: 1.0
       ratio_max: 1.0
       desc: ''
     无截图:
-      ratio_min: 0.3
+      ratio_min: 0.2
+      ratio_max: 0.5
+      desc: ''
+    有图像:
+      ratio_min: 1.0
+      ratio_max: 1.0
+      desc: ''
+    无图像:
+      ratio_min: 0.2
       ratio_max: 0.5
       desc: ''
     敷衍:
-      ratio_min: 0.25
-      ratio_max: 0.5
+      ratio_min: 0.15
+      ratio_max: 0.4
       desc: ''
     空:
       ratio_min: 0.0
       ratio_max: 0.0
       desc: ''
     素材不足:
-      ratio_min: 0.3
-      ratio_max: 0.7
+      ratio_min: 0.25
+      ratio_max: 0.6
       desc: ''
     有表格:
-      ratio_min: 0.9
+      ratio_min: 1.0
       ratio_max: 1.0
       desc: ''
   code_base_ratio: 0.6
@@ -127,18 +135,16 @@ agent_test:
   enabled: false
   timeout: 15
   headless: true
-
-# ===== 多模型路由 =====
 model_router:
-  text_model: deepseek-chat        # 纯文本题（便宜优先）
-  vision_model: qwen-vl-max        # 视觉题（Qwen 国内合规）
-  reasoning_model: deepseek-reasoner  # 深度推理
-  tier_model: gpt-4o-mini          # 档位判定（轻量便宜）
-  vision_fallback:                  # 视觉模型 fallback 链
-    - gpt-4o
-    - qwen-vl-max
-    - glm-4v
+  text_model: deepseek-chat
+  vision_model: glm-4.6v-flash
+  reasoning_model: deepseek-reasoner
+  tier_model: deepseek-chat
+  vision_fallback:
+  - qwen-vl-max
+  - glm-4v
+  - glm-4v-flash
   text_fallback:
-    - deepseek-chat
-  high_value_threshold: 20          # 大分值题阈值（分）
-  high_value_model: gpt-4o          # 大分值用高级模型
+  - deepseek-chat
+  high_value_threshold: 25
+  high_value_model: glm-4.6v-flash

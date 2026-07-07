@@ -263,9 +263,13 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     rubric = lr(rubric_path)
     st.session_state.rubric = rubric
 
-    key = os.environ.get("DEEPSEEK_KEY", "") or st.session_state.api_key_input
-    if not key:
-        st.error("请先在侧边栏设置 API Key")
+    key = os.environ.get("DEEPSEEK_KEY", "") or st.session_state.get("api_key_input", "")
+    # 确保 model_router 能读取到 Key（写入环境变量）
+    if key and not os.environ.get("DEEPSEEK_KEY"):
+        os.environ["DEEPSEEK_KEY"] = key
+    has_zhipu = bool(os.environ.get("ZHIPU_KEY", ""))
+    if not key and not has_zhipu:
+        st.error("请先在侧边栏设置 API Key（DeepSeek 或智谱至少配一个）")
         st.stop()
 
     config["llm"]["api_key"] = key
@@ -320,6 +324,7 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
 
             total_score = 0
             all_scores = {}
+            model_summary = {}
             for q in rubric["questions"]:
                 qid = q["id"]
                 qk = f"q{qid}"
@@ -328,8 +333,12 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                     r = grade(clean[qk], q, config)
                     all_scores[qid] = r
                     total_score += r.get("总分", 0)
+                    # 记录模型使用（用于降级警告）
+                    mu = r.get("_model_used", "unknown")
+                    model_summary[mu] = model_summary.get(mu, 0) + 1
                 except Exception as e:
                     all_scores[qid] = {"总分": 0, "评语": f"评分异常: {e}", "切题判断": "错误"}
+                    model_summary["error"] = model_summary.get("error", 0) + 1
                     stat.text(f"Q{qid}评分异常 ({i+1}/{len(class_papers)}): {fn} -- {e}")
 
             pt = paper.get("paper_dir", "")
@@ -358,6 +367,7 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                 "总分": total_score,
                 "文件名": fn,
                 "_criteria": criteria,
+                "_model_used_summary": model_summary,
                 "class_name": cn,
                 "_source_file": os.path.basename(pp),  # 用于查重匹配
             })
@@ -387,6 +397,28 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                     st.caption(item)
                 if len(review_items) > 50:
                     st.caption(f"... 还有 {len(review_items) - 50} 项")
+
+        # ---- 模型使用摘要 ----
+        _model_used_count = {}
+        _has_fallback = False
+        for r in results:
+            for q in rubric["questions"]:
+                qid = q["id"]
+                qs = r.get("_criteria", {}).get(str(qid), {})
+                # 从 all_scores 拿 _model_used
+                pass
+            mu = r.get("_model_used_summary", {})
+            for m, c in mu.items():
+                _model_used_count[m] = _model_used_count.get(m, 0) + c
+                if "fallback" in m or "error" in m:
+                    _has_fallback = True
+
+        if _has_fallback:
+            with st.expander("⚠️ 模型调用降级提醒", expanded=True):
+                st.warning(
+                    "部分题目使用了降级模型（主模型调用失败后自动切换）。\n"
+                    "这可能影响评分准确性。建议在「评分配置 → 模型路由」中检查 API Key 配置。"
+                )
 
         if failed:
             stat.text(f"✅ {cn} 完成！成功 {len(results)}/{len(class_papers)}，失败 {len(failed)}")
@@ -542,5 +574,4 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
                                        file_name=f"查重报告_{cn}.zip", key=f"dlzip_{cn}")
                 else:
                     st.caption("查重报告：未生成")
-
         st.markdown("---")

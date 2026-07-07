@@ -24,6 +24,12 @@ venv/
 .DS_Store
 Thumbs.db
 
+# 环境变量（含API Key，不要提交）
+.env
+
+# 验证脚本生成的临时图片
+tools/_test_image.png
+
 # 运行时临时文件
 data/.session_token
 data/prefs.json

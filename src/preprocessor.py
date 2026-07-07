@@ -431,20 +431,24 @@ def _extract_question(content_tables: list, question: dict,
                         result["bot_link"] = urls[0]
                         break
 
+    # 链接可达性检测（异步检查链接是否真实可访问）
+    if result["bot_link"] and "http" in str(result["bot_link"]):
+        result["link_reachable"] = _check_url_reachable(result["bot_link"])
+    else:
+        result["link_reachable"] = None
+
     # ---- 图片分配（给 vision 类题目） ----
     if gtype == "vision":
-        # 方形大图作为生成图（跳过宽高为0的无效图片）
-        square_imgs = [(p, w, h) for p, w, h in images
-                       if w > 0 and h > 0 and (
-                           (w == h and w >= 500) or
-                           (0.7 < w/h < 1.3 and w >= 1000)
-                       )]
-        gen_imgs = [p for p, w, h in square_imgs[:3]]
-        if gen_imgs:
-            result["generated_images"] = gen_imgs
-        ref_imgs = [p for p, w, h in square_imgs[3:4]]
-        if ref_imgs:
-            result["reference_image"] = ref_imgs[0]
+        # 按面积排序取大图（不再强制方形，截图和生成图都需评估）
+        valid_imgs = [(p, w, h) for p, w, h in images
+                       if w > 200 and h > 200]
+        # 按面积降序排列
+        valid_imgs.sort(key=lambda x: x[1] * x[2], reverse=True)
+        all_paths = [p for p, w, h in valid_imgs]
+        # 前3张作为生成图，第4张作为参考图
+        result["generated_images"] = all_paths[:3]
+        if len(all_paths) > 3:
+            result["reference_image"] = all_paths[3]
 
     return result
 
@@ -455,6 +459,7 @@ def _extract_question(content_tables: list, question: dict,
 
 def _extract_text_by_label(rows: list, labels: list) -> str:
     """根据标签关键词从行中提取最长文本"""
+    _LABEL_KW = ["截图", "链接", "提交", "文件", "图片", "视频"]
     for ri, row in enumerate(rows):
         row_str = " ".join(str(c) for c in row)
         for kw in labels:
@@ -466,9 +471,9 @@ def _extract_text_by_label(rows: list, labels: list) -> str:
                 # 当前行没有，检查后续行（跨行内容）
                 for next_row in rows[ri + 1:ri + 4]:
                     next_texts = [str(c) for c in next_row if len(str(c)) > 5]
-                    # 排除后续行也是标签的情况
+                    # 只跳过明显是标签的短行（≤25字且含标签关键词），不跳过内容行
                     non_label = [t for t in next_texts
-                                 if not any(kw2 in t for kw2 in ["截图", "链接", "提交", "文件", "图片", "视频"])]
+                                 if len(t) > 25 or not any(kw2 in t for kw2 in _LABEL_KW)]
                     if non_label:
                         return max(non_label, key=len)
                 return ""  # 标签找到但无内容 → 返回空
@@ -556,3 +561,22 @@ def _resize_image(img_path: str, max_width: int, quality: int) -> str | None:
         return new_path
     except Exception:
         return None
+
+
+# ============================================================
+#  链接可达性检测
+# ============================================================
+def _check_url_reachable(url: str, timeout: int = 5) -> bool | None:
+    """检测链接是否真实可访问。返回 True/False/None(无法判断)"""
+    import urllib.request
+    import urllib.error
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        req.add_header('User-Agent', 'Mozilla/5.0')
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        return 200 <= resp.status < 400
+    except urllib.error.HTTPError as e:
+        # 有些平台 HEAD 不支持但对 GET 返回 200
+        return 200 <= e.code < 400 or e.code == 403  # 403 = 存在但没权限
+    except Exception:
+        return None  # 网络不可达时不扣分，仅标记为未知

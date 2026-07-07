@@ -97,11 +97,8 @@ PAGES = {
     "个人信息": st.Page("pages/7_profile.py", title="个人信息", icon=":material/person:"),
 }
 
-pg = st.navigation(list(PAGES.values()), position="sidebar")
-pg.run()
-
 # ============================================================
-#  侧边栏
+#  侧边栏（必须在 pg.run() 之前，否则多页导航下会消失）
 # ============================================================
 with st.sidebar:
     st.caption(teacher)
@@ -150,6 +147,9 @@ with st.sidebar:
         if os.path.exists(token_file):
             os.remove(token_file)
         st.rerun()
+
+pg = st.navigation(list(PAGES.values()), position="sidebar")
+pg.run()
 
 
 # ============================================================
