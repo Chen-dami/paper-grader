@@ -592,13 +592,23 @@ def _grade_llm(q_data, question, config, use_vision=False):
 - 如有图片格式问题不可见，以文字描述为准
 """
     if gtype == "text":
-        strategy_rules = """
-【文本评分模式】
-- 根据所有可用文字内容（提示词、生成结果、表格原文等）综合评估质量
-- 检查学生提交内容中的完整度：是否有提示词 + 是否有生成文案/结果
-- 如果表格原文中包含生成结果文本 → 正常评分（评估主题契合、内容质量）
+        # 文本题：是否真有视觉可用是关键（不是strategy名称）
+        if use_vision:
+            # 视觉可用 → 可严格评估
+            strategy_rules = """
+【文本评分模式 — 视觉辅助】
+- 视觉模型可查看截图验证生成结果质量
+- 根据所有可用文字内容（提示词、生成结果、表格原文等）综合评估
 - 如果只有提示词没有生成结果 → 提交完整性扣分（但提示词质量本身正常评）
-- 不要凭空猜测截图中的内容，但表格原文中明确写出的文字应作为评分依据
+"""
+        else:
+            # 无视觉 → 宽松原则：看不到图不扣分
+            strategy_rules = """
+【文本评分模式 — 无视觉辅助】
+- 系统无法查看截图中的生成结果，但这不是学生的错
+- 以提示词质量为主要评分依据，提示词详细即给满分
+- 截图标记存在 → 视为生成结果已提交 → 提交完整性给满分
+- 不要因为看不到截图中的文案而扣分
 """
 
     # 智能体特殊规则
@@ -718,12 +728,23 @@ def _build_content_desc(q_data, question):
     parts = []; name = question.get("name", ""); gtype = question.get("grading_type", "text")
     has_real_content = False
     missing_key_fields = []  # 追踪哪些关键字段缺失
-    # 根据题型决定哪些字段是"关键输出字段"（缺失时需要补充表格原文）
-    key_output_fields = {"result_text"}  # 所有题型都关注生成结果
-    if gtype == "hybrid":
-        key_output_fields.add("persona_text")
-    if gtype == "vision":
-        key_output_fields.update({"image_prompt", "video_prompt"})
+    # 从 submission_labels 推导该题实际需要哪些字段（而非笼统按题型）
+    labels = question.get("submission_labels", [])
+    key_output_fields = set()
+    label_to_field = {
+        "提示词": "prompt_text", "生成结果": "result_text",
+        "图片提示词": "image_prompt", "视频提示词": "video_prompt",
+        "人设": "persona_text", "逻辑": "persona_text",
+    }
+    for sl in labels:
+        field = sl.get("field", "")
+        lbl = sl.get("label", "")
+        if field in ("result_text", "persona_text", "image_prompt", "video_prompt"):
+            key_output_fields.add(field)
+        # 也通过 label 关键词推断
+        for kw, f in label_to_field.items():
+            if kw in lbl:
+                key_output_fields.add(f)
 
     for key, label in [("prompt_text", "提示词"), ("result_text", "生成结果"),
                         ("image_prompt", "图片提示词"), ("video_prompt", "视频提示词"),
