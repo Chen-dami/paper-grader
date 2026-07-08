@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================
@@ -7,34 +7,103 @@ echo   AI Grading System - Update
 echo ============================================
 echo.
 
+:: ============================================
+:: 方式1: Git 更新（如果有 Git）
+:: ============================================
 where git >nul 2>&1
-if errorlevel 1 (
-    echo Git not found. Cannot auto-update.
-    echo Install Git: https://git-scm.com/download/win
-    echo Or re-download from: https://github.com/Chen-dami/paper-grader
-    pause
-    exit /b 1
+if not errorlevel 1 (
+    echo [Git] Pulling latest code...
+    git pull origin master
+    if not errorlevel 1 (
+        echo   OK - Git update done
+        goto :update_deps
+    )
+    echo   Git pull failed, trying download method...
 )
 
-echo [1/2] Pulling latest code...
-git pull origin master
-if errorlevel 1 (
-    echo FAIL: git pull failed. Check network.
+:: ============================================
+:: 方式2: 下载 ZIP 更新（无需 Git）
+:: ============================================
+echo [Download] Fetching latest version from GitHub...
+set "ZIP_URL=https://github.com/Chen-dami/paper-grader/archive/refs/heads/master.zip"
+set "TEMP_ZIP=%TEMP%\paper-grader-update.zip"
+set "TEMP_DIR=%TEMP%\paper-grader-update"
+
+:: 清理旧的临时文件
+if exist "%TEMP_ZIP%" del /q "%TEMP_ZIP%"
+if exist "%TEMP_DIR%" rmdir /s /q "%TEMP_DIR%"
+
+:: 下载（PowerShell 备选 curl）
+powershell -Command "Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%TEMP_ZIP%'" 2>nul
+if not exist "%TEMP_ZIP%" (
+    curl -L -o "%TEMP_ZIP%" "%ZIP_URL%" 2>nul
+)
+if not exist "%TEMP_ZIP%" (
+    echo   FAIL: Cannot download. Check network.
+    echo   Manual: https://github.com/Chen-dami/paper-grader
     pause
     exit /b 1
 )
-echo   OK
+echo   Downloaded OK
+
+:: 解压
+echo [Extract] Unzipping...
+powershell -Command "Expand-Archive -Path '%TEMP_ZIP%' -DestinationPath '%TEMP_DIR%' -Force" 2>nul
+if not exist "%TEMP_DIR%" (
+    :: 备用：使用 tar（Windows 10 1803+ 内置）
+    tar -xf "%TEMP_ZIP%" -C "%TEMP_DIR%" 2>nul
+)
+if not exist "%TEMP_DIR%\paper-grader-master" (
+    echo   FAIL: Cannot extract. Try manual update.
+    pause
+    exit /b 1
+)
+echo   Extracted OK
+
+:: 复制新文件（保留用户数据: data/, output/, .env, .venv/）
+echo [Copy] Updating files (preserving your data)...
+set "SRC=%TEMP_DIR%\paper-grader-master"
+
+:: 逐个目录/文件复制，跳过用户数据
+for /d %%d in ("%SRC%\*") do (
+    set "dirname=%%~nd"
+    if /i not "!dirname!"=="data" if /i not "!dirname!"=="output" if /i not "!dirname!"==".venv" (
+        if exist ".\!dirname!" rmdir /s /q ".\!dirname!" 2>nul
+        xcopy "%%d" ".\!dirname!\" /E /Y /Q >nul 2>&1
+    )
+)
+for %%f in ("%SRC%\*.*") do (
+    set "fname=%%~nxf"
+    if /i not "!fname!"==".env" (
+        copy /y "%%f" ".\" >nul 2>&1
+    )
+)
+:: 确保 data/ output/ 目录存在
+if not exist "data" mkdir "data"
+if not exist "output" mkdir "output"
+
+:: 清理临时文件
+del /q "%TEMP_ZIP%" 2>nul
+rmdir /s /q "%TEMP_DIR%" 2>nul
+echo   Files updated OK
+
+:: ============================================
+:: 更新依赖
+:: ============================================
+:update_deps
 echo.
-
-echo [2/2] Updating dependencies...
+echo [Deps] Checking Python dependencies...
 if exist ".venv\Scripts\python.exe" (
     .venv\Scripts\python.exe -m pip install -r requirements.txt -q --upgrade -i https://pypi.tuna.tsinghua.edu.cn/simple
     echo   OK
 ) else (
-    echo   WARN: no .venv found, run setup.bat first
+    echo   WARN: .venv not found, run setup.bat first
 )
+
 echo.
 echo ============================================
-echo   Update complete! Restart the app.
+echo   Update complete!
+echo   Your data/ output/ .env are safe.
+echo   Restart the app to use new version.
 echo ============================================
 pause

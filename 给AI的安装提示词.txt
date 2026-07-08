@@ -57,5 +57,5 @@ setx ZHIPU_KEY "你的智谱API_Key"
 或者去「AI 助手」页，选「阅卷控制」模式，直接说"换成免费视觉"即可。
 
 日常使用：双击「启动阅卷系统.bat」即可。
-更新版本：双击「更新.bat」自动拉取最新代码。
+更新版本：双击「更新.bat」（无需 Git，自动下载最新版，试卷和成绩不会被覆盖）。
 调试评分：命令行运行 `python tools/debug_grade.py "学生.docx路径" --strategy free_vision`
