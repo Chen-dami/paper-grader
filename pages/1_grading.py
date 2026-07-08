@@ -160,18 +160,31 @@ with tab1:
                         fp = os.path.join(ep, f)
                         if f.startswith('~$'):
                             continue
-                        if f.lower().endswith('.docx'):
+                        fl = f.lower()
+                        # 匹配 .docx（含缺.号的变体如 xxxdocx）
+                        is_docx = fl.endswith('.docx') or (
+                            fl.endswith('docx') and not fl.endswith('.docx') and
+                            os.path.isfile(fp)
+                        )
+                        if is_docx:
                             docx_found.append(fp)
-                        elif f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        elif fl.endswith(('.png', '.jpg', '.jpeg')):
                             images.append(fp)
-                        elif f.lower().endswith(('.xlsx', '.xls')):
+                        elif fl.endswith(('.xlsx', '.xls')):
                             excels.append(fp)
                     if docx_found:
-                        docx_found.sort(key=lambda x: os.path.getsize(x), reverse=True)
-                        student_folders.append((entry, docx_found[0], {
+                        # 优先选学生答卷（排除试卷模板）：文件名含学号 > 含书名号/试卷关键词
+                        student_docx = [d for d in docx_found
+                                        if not any(kw in os.path.basename(d) for kw in ['试卷', '期末', '《'])]
+                        if not student_docx:
+                            student_docx = docx_found  # 全是模板，兜底
+                        # 有多个候选时选最大的（学生答卷通常比空模板大）
+                        chosen = max(student_docx, key=lambda x: os.path.getsize(x))
+                        student_folders.append((entry, chosen, {
                             "images": images, "excel": excels
                         }))
-                elif entry.lower().endswith('.docx'):
+                elif entry.lower().endswith('.docx') or (
+                    entry.lower().endswith('docx') and not entry.lower().endswith('.docx')):
                     loose_docx.append((ep, entry))
 
             total = len(student_folders) + len(loose_docx)

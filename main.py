@@ -138,11 +138,16 @@ def main():
                   if os.path.isdir(os.path.join(papers_dir, d))]
     if not class_dirs:
         class_dirs = ["."]
-        paper_files = {'.': sorted(glob.glob(os.path.join(papers_dir, "*.docx")))}
+        # 支持 .docx 和缺.号的 docx 变体（如 xxxdocx）
+        raw = set(glob.glob(os.path.join(papers_dir, "*.docx")) +
+                  glob.glob(os.path.join(papers_dir, "*docx")))
+        paper_files = {'.': sorted(raw)}
     else:
         paper_files = {}
         for cls in class_dirs:
-            files = sorted(glob.glob(os.path.join(papers_dir, cls, "*.docx")))
+            raw = set(glob.glob(os.path.join(papers_dir, cls, "*.docx")) +
+                      glob.glob(os.path.join(papers_dir, cls, "*docx")))
+            files = sorted(raw)
             if files:
                 paper_files[cls] = files
 

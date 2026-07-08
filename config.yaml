@@ -7,7 +7,7 @@ llm:
   max_tokens: 2048
   temperature: 0.3
 grading:
-  mode: strict
+  mode: normal
   pass_line: 60
   tiers:
     贴合主题:
@@ -137,8 +137,8 @@ agent_test:
   headless: true
 model_router:
   text_model: deepseek-chat
-  vision_model: glm-4.6v-flash
-  vision_strategy: free_vision
+  vision_model: qwen-vl-plus
+  vision_strategy: paid_vision
   reasoning_model: deepseek-reasoner
   tier_model: deepseek-chat
   vision_fallback:
@@ -148,4 +148,4 @@ model_router:
   text_fallback:
   - deepseek-chat
   high_value_threshold: 25
-  high_value_model: deepseek-chat
+  high_value_model: qwen-vl-plus
