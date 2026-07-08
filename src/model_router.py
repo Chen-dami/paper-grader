@@ -445,7 +445,21 @@ def describe_images(images: list, question_name: str = "",
         if question_score >= rc["high_value_threshold"]:
             model_name = rc["high_value_model"]
 
-    # 检查并 fallback
+    # 检查主模型是否真正支持视觉（不能只看 API key）
+    info = MODEL_REGISTRY.get(model_name, {})
+    if not info.get("vision"):
+        # 主模型不支持视觉 → 尝试 fallback
+        found = False
+        for fb in rc.get("vision_fallback", []):
+            if _model_available(fb) and MODEL_REGISTRY.get(fb, {}).get("vision"):
+                model_name = fb
+                found = True
+                break
+        if not found:
+            print(f"[model_router] {model_name} 不支持视觉且无可用fallback，跳过图片描述", file=_sys.stderr)
+            return ""
+
+    # 检查并 fallback（API key 不可用的情况）
     if not _model_available(model_name):
         found = False
         for fb in rc.get("vision_fallback", []):

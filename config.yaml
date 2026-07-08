@@ -137,7 +137,7 @@ agent_test:
   headless: true
 model_router:
   text_model: deepseek-chat
-  vision_model: deepseek-chat
+  vision_model: qwen-vl-plus
   vision_strategy: paid_vision
   reasoning_model: deepseek-reasoner
   tier_model: deepseek-chat
