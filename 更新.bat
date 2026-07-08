@@ -33,14 +33,35 @@ set "TEMP_DIR=%TEMP%\paper-grader-update"
 if exist "%TEMP_ZIP%" del /q "%TEMP_ZIP%"
 if exist "%TEMP_DIR%" rmdir /s /q "%TEMP_DIR%"
 
-:: 下载（PowerShell 备选 curl）
-powershell -Command "Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%TEMP_ZIP%'" 2>nul
-if not exist "%TEMP_ZIP%" (
-    curl -L -o "%TEMP_ZIP%" "%ZIP_URL%" 2>nul
+:: 下载（主URL + 备用URL，PowerShell + curl双保险，重试2次）
+set "URLS=https://codeload.github.com/Chen-dami/paper-grader/zip/refs/heads/master https://github.com/Chen-dami/paper-grader/archive/refs/heads/master.zip"
+set "DOWNLOADED=0"
+for /l %%r in (1,1,2) do (
+    if "!DOWNLOADED!"=="0" (
+        if %%r gtr 1 (
+            echo   Retrying (attempt %%r/2^)...
+            timeout /t 2 >nul
+        )
+        for %%u in (%URLS%) do (
+            if "!DOWNLOADED!"=="0" (
+                powershell -Command "try { Invoke-WebRequest -Uri '%%u' -OutFile '%TEMP_ZIP%' -TimeoutSec 30 } catch { exit 1 }" 2>nul
+                if exist "%TEMP_ZIP%" set "DOWNLOADED=1"
+            )
+        )
+        if "!DOWNLOADED!"=="0" (
+            for %%u in (%URLS%) do (
+                if "!DOWNLOADED!"=="0" (
+                    curl -sL -o "%TEMP_ZIP%" "%%u" 2>nul
+                    if exist "%TEMP_ZIP%" set "DOWNLOADED=1"
+                )
+            )
+        )
+    )
 )
 if not exist "%TEMP_ZIP%" (
-    echo   FAIL: Cannot download. Check network.
-    echo   Manual: https://github.com/Chen-dami/paper-grader
+    echo   FAIL: Download failed (network or rate limit).
+    echo   Manual update: https://github.com/Chen-dami/paper-grader
+    echo   Click 'Code' -^> 'Download ZIP', extract and overwrite.
     pause
     exit /b 1
 )
