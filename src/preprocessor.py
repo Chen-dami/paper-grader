@@ -462,8 +462,49 @@ def _extract_question(content_tables: list, question: dict,
         ))
     )
     if excel_files and _needs_excel:
-        result["has_excel_file"] = True
-        result["excel_path"] = excel_files[0]
+        # 智能选择学生作业Excel（而非题目模板或无关文件）
+        import pandas as pd
+        scored = []  # [(path, score), ...]
+        for xf in excel_files:
+            fname = os.path.basename(xf).lower()
+            score = 0
+            # 加分项：文件名暗示是学生处理结果
+            if any(kw in fname for kw in ['处理', '完成', '答案', '作业']):
+                score += 10
+            # 扣分项：文件名暗示是题目模板
+            if any(kw in fname for kw in ['题目', '试题', '原始', '汇总表']):
+                score -= 20
+            if '校园' in fname or '失物' in fname:
+                score -= 30  # 这是Q5的知识库文件，不是Q4作业
+            # 加分项：Excel 内有 Q4 相关字段
+            try:
+                df = pd.read_excel(xf, nrows=0)  # 只读表头
+                cols = [str(c).lower() for c in df.columns]
+                if any(kw in ' '.join(cols) for kw in ['销售金额', '销售日期', '商品']):
+                    score += 30  # 强烈匹配Q4
+                if any(kw in fname for kw in ['数据', '销售']) or any(kw in ' '.join(cols) for kw in ['数据', '销售']):
+                    score += 5
+            except Exception:
+                pass
+            # 加分项：文件较大（学生的处理结果通常比题目模板大）
+            try:
+                size_kb = os.path.getsize(xf) / 1024
+                if size_kb > 50:
+                    score += 5
+            except Exception:
+                pass
+            scored.append((xf, score))
+
+        # 选最高分，但至少要有基本文件匹配才认
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best_path, best_score = scored[0]
+        if best_score >= 0:  # 有基本可信度
+            result["has_excel_file"] = True
+            result["excel_path"] = best_path
+        else:
+            # 全是无关文件（如只有Q5的汇总表和题目模板）
+            result["has_excel_file"] = False
+            result["excel_path"] = ""
 
     # 链接检测
     for i, text in paragraphs:
