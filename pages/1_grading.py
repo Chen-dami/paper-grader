@@ -297,6 +297,19 @@ if st.button("开始阅卷", type="primary", disabled=not can_run, use_container
     # 注入视觉策略（从 config.yaml，UI 已保存）
     vision_strategy = config.get("model_router", {}).get("vision_strategy", "paid_vision")
     config["vision_strategy"] = vision_strategy
+
+    # AI 助手覆盖：合并会话级临时设置
+    from src.grading_overrides import get_effective_config, has_overrides, describe_overrides, clear_overrides
+    config = get_effective_config(config)
+    if has_overrides():
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.info(f"🤖 AI 助手已调整：{describe_overrides()}")
+        with c2:
+            if st.button("↩ 恢复默认", key="reset_overrides"):
+                clear_overrides()
+                st.rerun()
+
     # 按题跳过视觉：ai_vision_q{id}=False 的题老师自己看图
     skip_vision_ids = {
         q["id"] for q in vision_questions
