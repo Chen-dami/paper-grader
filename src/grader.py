@@ -322,10 +322,16 @@ def _grade_code(q_data: dict, question: dict, config: dict) -> dict:
                 scores[c["id"]] = max(1, int(c["max"] * base_ratio) - 1)
                 reasons[c["id"]] = f"读取失败({str(e)[:50]})"
     else:
-        no_file_ratio = 0.3 if has_screenshot else 0.0
+        # 无 Excel 文件：核心交付物缺失
+        # 有截图说明学生可能用截图代替 → 最多给基础分
+        # 无截图 → 空题，0分
+        no_file_ratio = 0.15 if has_screenshot else 0.0
         for c in criteria:
-            scores[c["id"]] = int(c["max"] * no_file_ratio)
-            reasons[c["id"]] = f"未提交Excel文件（核心交付物缺失），有截图仅给{int(no_file_ratio*100)}%基础分" if has_screenshot else "未提交Excel文件和截图，无法评分"
+            scores[c["id"]] = max(1, int(c["max"] * no_file_ratio)) if has_screenshot else 0
+            reasons[c["id"]] = (
+                f"未提交Excel文件（核心交付物缺失），仅有截图给{int(no_file_ratio*100)}%基础分"
+                if has_screenshot else "未提交Excel文件和截图，无法评分"
+            )
 
     prompt_text = q_data.get("prompt_text", "")
     for c in criteria:
@@ -594,7 +600,6 @@ def _grade_llm(q_data, question, config, use_vision=False):
     if gtype == "text":
         # 文本题：是否真有视觉可用是关键（不是strategy名称）
         if use_vision:
-            # 视觉可用 → 可严格评估
             strategy_rules = """
 【文本评分模式 — 视觉辅助】
 - 视觉模型可查看截图验证生成结果质量
@@ -602,13 +607,17 @@ def _grade_llm(q_data, question, config, use_vision=False):
 - 如果只有提示词没有生成结果 → 提交完整性扣分（但提示词质量本身正常评）
 """
         else:
-            # 无视觉 → 宽松原则：看不到图不扣分
+            # 无视觉 → 但仍有文字可评估，不可盲目给满分
             strategy_rules = """
 【文本评分模式 — 无视觉辅助】
-- 系统无法查看截图中的生成结果，但这不是学生的错
-- 以提示词质量为主要评分依据，提示词详细即给满分
-- 截图标记存在 → 视为生成结果已提交 → 提交完整性给满分
-- 不要因为看不到截图中的文案而扣分
+- 系统无法查看截图，但可以根据文字质量评分
+- 评分依据：提示词是否切题(关键词)、是否详细(字数)、是否有生成结果标记
+- 提示词质量分级：
+  - 提示词 > 100 字且包含题目关键词 → 主题+文案 80-100%
+  - 提示词 30-100 字 → 主题+文案 50-80%
+  - 提示词 < 30 字或明显偏题 → 20-50%
+- 提交完整性：有截图标记=满分，无截图标记=0
+- 不要因为看不到截图文案而扣内容质量分，但也不要盲目给满分
 """
 
     # 智能体特殊规则
@@ -689,6 +698,28 @@ def _grade_llm(q_data, question, config, use_vision=False):
             question_score=max_score, temperature=0.3, max_tokens=2048,
         )
         parsed = _parse_json(llm_result["content"])
+
+        # JSON 解析失败 → 用正则从原文提取分数 + 材料兜底
+        if parsed.get("parse_error"):
+            import re as _re
+            fallback_scores = {}
+            # 尝试从原文提取每个得分项
+            for c in criteria:
+                key = f"得分_{c['id']}_{c['name']}"
+                # 匹配 "得分_X-X_xxx": 数字
+                pattern = rf'["\"]?得分_{c["id"]}_{c["name"]}["\"]?\s*[:：]\s*(\d+)'
+                m = _re.search(pattern, llm_result["content"])
+                if m:
+                    fallback_scores[key] = min(int(m.group(1)), c["max"])
+            # 如果正则也提取不到 → 按材料证据给兜底分（绝不给0）
+            if not fallback_scores:
+                for c in criteria:
+                    key = f"得分_{c['id']}_{c['name']}"
+                    fallback_scores[key] = max(1, int(c["max"] * 0.4))  # 至少40%
+            parsed = {**fallback_scores, "总分": sum(fallback_scores.values()),
+                      "档位判定": "材料不足", "评语": "JSON解析失败，已用材料证据兜底评分",
+                      "parse_error": True, "_fallback": True}
+
         parsed["切题判断"] = parsed.get("档位判定", "材料齐全")
         parsed["tokens_in"] = llm_result["tokens_in"]
         parsed["tokens_out"] = llm_result["tokens_out"]
