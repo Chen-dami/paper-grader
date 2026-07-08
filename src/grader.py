@@ -594,9 +594,11 @@ def _grade_llm(q_data, question, config, use_vision=False):
     if gtype == "text":
         strategy_rules = """
 【文本评分模式】
-- 根据文字内容质量评分
-- 截图中的文案内容看不到 → 以提示词质量为评分依据，提示词详细即给满分
-- 不要因为看不到截图中的文案而扣分
+- 根据所有可用文字内容（提示词、生成结果、表格原文等）综合评估质量
+- 检查学生提交内容中的完整度：是否有提示词 + 是否有生成文案/结果
+- 如果表格原文中包含生成结果文本 → 正常评分（评估主题契合、内容质量）
+- 如果只有提示词没有生成结果 → 提交完整性扣分（但提示词质量本身正常评）
+- 不要凭空猜测截图中的内容，但表格原文中明确写出的文字应作为评分依据
 """
 
     # 智能体特殊规则
@@ -713,7 +715,16 @@ def _build_rule_context(q_data, question) -> str:
 
 
 def _build_content_desc(q_data, question):
-    parts = []; name = question.get("name", ""); has_real_content = False
+    parts = []; name = question.get("name", ""); gtype = question.get("grading_type", "text")
+    has_real_content = False
+    missing_key_fields = []  # 追踪哪些关键字段缺失
+    # 根据题型决定哪些字段是"关键输出字段"（缺失时需要补充表格原文）
+    key_output_fields = {"result_text"}  # 所有题型都关注生成结果
+    if gtype == "hybrid":
+        key_output_fields.add("persona_text")
+    if gtype == "vision":
+        key_output_fields.update({"image_prompt", "video_prompt"})
+
     for key, label in [("prompt_text", "提示词"), ("result_text", "生成结果"),
                         ("image_prompt", "图片提示词"), ("video_prompt", "视频提示词"),
                         ("persona_text", "人设/逻辑")]:
@@ -721,7 +732,11 @@ def _build_content_desc(q_data, question):
         text = ""
         if isinstance(val, str): text = val.strip()
         elif isinstance(val, list): text = " ".join(str(v) for v in val if isinstance(v, str)).strip()
-        if text: parts.append(f"{label}：{text[:300]}"); has_real_content = True
+        if text:
+            parts.append(f"{label}：{text[:300]}")
+            has_real_content = True
+        elif key in key_output_fields:
+            missing_key_fields.append(label)
 
     if q_data.get("has_video") and q_data.get("video_path"):
         vinfo = q_data.get("video_info", "")
@@ -751,11 +766,21 @@ def _build_content_desc(q_data, question):
 
     if q_data.get("has_screenshot"): parts.append("截图：有")
 
+    # 关键改进：即使提取到部分字段，也追加表格原文让LLM自己找遗漏的内容
+    # 之前只在 has_real_content=False 时才发送，导致Q1等题丢失生成结果
+    all_table = q_data.get("all_table_text", "")
+    if isinstance(all_table, list): all_table = " ".join(str(v) for v in all_table if isinstance(v, str))
+    elif not isinstance(all_table, str): all_table = str(all_table)
+    all_table = all_table.strip()
+
     if not has_real_content:
-        fallback = q_data.get("all_table_text", "")
-        if isinstance(fallback, list): fallback = " ".join(str(v) for v in fallback if isinstance(v, str))
-        elif not isinstance(fallback, str): fallback = str(fallback)
-        if fallback.strip(): parts.append(f"学生提交内容：{fallback.strip()[:800]}")
+        # 完全没有提取到内容 → 表格原文作为主体
+        if all_table:
+            parts.append(f"学生提交内容：{all_table[:800]}")
+    elif missing_key_fields and all_table:
+        # 提取到了部分字段，但关键输出字段缺失（如生成结果、人设文本）
+        # → 追加表格原文让LLM补救查找
+        parts.append(f"【补充：表格原文（以下字段缺失: {', '.join(missing_key_fields)}，请从原文中查找）】\n{all_table[:800]}")
 
     return "\n".join(parts) if parts else "（无内容）"
 
