@@ -39,7 +39,7 @@ for docx_path in PAPERS:
         qk = f"q{q['id']}"
         qd = clean.get(qk, {})
         gtype = q.get("grading_type", "text")
-        is_empty = _is_truly_empty(qd, gtype)
+        is_empty = _is_truly_empty(qd, gtype, STRATEGY)
         use_vis = _should_use_vision(gtype, config)
         scr = qd.get("has_screenshot", False)
         vid = qd.get("has_video", False)

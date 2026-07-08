@@ -45,7 +45,7 @@ for strategy in ["text_only", "paid_vision"]:
             gtype = q.get("grading_type", "text")
 
             # Core judgments
-            is_empty = _is_truly_empty(qd, gtype)
+            is_empty = _is_truly_empty(qd, gtype, strategy)
             use_vis = _should_use_vision(gtype, config)
             content = _build_content_desc(qd, q)
 

@@ -38,7 +38,8 @@ def grade(q_data: dict, question: dict, config: dict,
             return _grade_code(q_data, question, config)
 
         # text / vision / hybrid: 空判 → LLM一步评分
-        if _is_truly_empty(q_data, gtype):
+        strategy = config.get("vision_strategy", "paid_vision")
+        if _is_truly_empty(q_data, gtype, strategy):
             return _zero_score(criteria, max_score, "内容为空")
 
         use_vision = _should_use_vision(gtype, config) and not force_no_vision
@@ -149,7 +150,15 @@ def _fuzzy_match(student_ans: str, correct_ans: str) -> bool:
 # ============================================================
 #  空判
 # ============================================================
-def _is_truly_empty(q_data, gtype):
+def _is_truly_empty(q_data, gtype, strategy="paid_vision"):
+    """
+    判断题目是否真正为空（学生没有提交任何实质内容）。
+
+    策略差异:
+    - text_only: 宽松 —— has_screenshot/has_excel_file 也算媒体证据，
+      宁可给分不可漏杀（系统看不到图，不能说学生没交）
+    - free_vision/paid_vision: 标准 —— 需要实质文字或可验证媒体才判非空
+    """
     if gtype == "code":
         return not (q_data.get("excel_path") or q_data.get("has_excel_file") or q_data.get("has_screenshot"))
 
@@ -161,18 +170,29 @@ def _is_truly_empty(q_data, gtype):
         elif isinstance(val, list):
             student_text += " ".join(str(v) for v in val if isinstance(v, str))
 
-    # all_table_text 单独处理：可能包含模板标签而非学生内容
+    # all_table_text 单独处理：模板标签通常 <20字，学生内容通常 >20字
     all_table = str(q_data.get("all_table_text", ""))
-    # 如果 all_table_text 主要由短行(<20字的标签行)组成 → 不算学生内容
     long_lines = [l for l in all_table.split("\n") if len(l.strip()) > 20]
     if long_lines:
         student_text += "\n".join(long_lines)
 
-    has_media = (
-        q_data.get("generated_images") or q_data.get("reference_image") or
-        (q_data.get("has_video") and q_data.get("video_path")) or
-        bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
-    )
+    # text_only: has_screenshot/has_excel_file 也算证据（系统看不到图但不能说学生没交）
+    # paid/free: 需要可验证的媒体（generated_images/视频/链接）
+    if strategy == "text_only":
+        has_media = (
+            q_data.get("generated_images") or q_data.get("reference_image") or
+            q_data.get("has_screenshot") or
+            (q_data.get("has_video") and q_data.get("video_path")) or
+            bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", ""))) or
+            q_data.get("has_excel_file")
+        )
+    else:
+        has_media = (
+            q_data.get("generated_images") or q_data.get("reference_image") or
+            (q_data.get("has_video") and q_data.get("video_path")) or
+            bool(q_data.get("bot_link") and "http" in str(q_data.get("bot_link", "")))
+        )
+
     return len(student_text.strip()) < 5 and not has_media
 
 
@@ -200,7 +220,8 @@ def _collect_text(q_data, gtype):
 def _detect_tier(q_data: dict, question: dict, config: dict) -> str:
     # 先检查是否真正为空（无实质内容），避免模板标签触发高分段位
     gtype = question.get("grading_type", "text")
-    if _is_truly_empty(q_data, gtype):
+    strategy = config.get("vision_strategy", "paid_vision")
+    if _is_truly_empty(q_data, gtype, strategy):
         return "空"
 
     keywords = question.get("topic_keywords", [])

@@ -65,7 +65,7 @@ def debug_grade(docx_path: str, strategy: str = "text_only"):
         print(f"    link_reachable: {qd.get('link_reachable')}")
 
         use_vision = _should_use_vision(q.get('grading_type', 'text'), config)
-        is_empty = _is_truly_empty(qd, q.get('grading_type', 'text'))
+        is_empty = _is_truly_empty(qd, q.get('grading_type', 'text'), strategy)
         print(f"  [判断] _is_truly_empty={is_empty} | _should_use_vision={use_vision}")
 
         # Hook into call_model to capture prompt
