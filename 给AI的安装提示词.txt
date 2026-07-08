@@ -4,6 +4,7 @@
 - 项目名称：AI 智能阅卷系统
 - 需要：Python 3.11+ / Git / pip
 - 启动方式：双击 .bat 脚本 → 浏览器自动打开 Web 界面
+- 三种视觉策略：免费视觉（零费用）/ 付费视觉（5张图）/ 纯文字（不看图）
 
 请按以下顺序指导我操作：
 
@@ -31,19 +32,30 @@
 第五步：配置 API Key
 打开 cmd（Win+R 输入 cmd），执行以下命令：
 ```
-setx ZHIPU_KEY "你的智谱API_Key"
 setx DEEPSEEK_KEY "你的DeepSeek_API_Key"
+setx ZHIPU_KEY "你的智谱API_Key"
 ```
 获取地址：
-- 智谱（视觉 · 免费）：https://open.bigmodel.cn → 个人中心 → API Keys
-- DeepSeek（文本 · ¥1/百万tokens）：https://platform.deepseek.com → API Keys
+- DeepSeek（文本评分 · ¥1/百万tokens）：https://platform.deepseek.com → API Keys
+- 智谱（视觉评分 · **免费**）：https://open.bigmodel.cn → 个人中心 → API Keys
+- 阿里云（付费视觉 · 可选）：https://bailian.console.aliyun.com → API-KEY管理
 
 配置后需要重新打开终端窗口才能生效。
+
+> 最低配置：DeepSeek（文本）+ 智谱（免费视觉），两个 Key 即可全覆盖且视觉零费用。
 
 第六步：启动系统
 - 双击 `启动阅卷系统.bat`
 - 浏览器自动打开 http://localhost:8501
 - 默认账号：admin / admin123（首次登录后修改）
 
+第七步：选择视觉策略
+进入「评分配置 → 模型路由」：
+- 下拉框选「免费视觉」→ 推荐，零费用
+- 下拉框选「付费视觉」→ 更准，需阿里云 Key
+- 下拉框选「纯文字」→ 最快，不看图
+或者去「AI 助手」页，选「阅卷控制」模式，直接说"换成免费视觉"即可。
+
 日常使用：双击「启动阅卷系统.bat」即可。
 更新版本：双击「更新.bat」自动拉取最新代码。
+调试评分：命令行运行 `python tools/debug_grade.py "学生.docx路径" --strategy free_vision`
